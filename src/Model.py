@@ -4,6 +4,25 @@ from torch.nn import Module
 import torch
 
 
+def load_model(path, available_classes: dict):
+    """
+    Load a model from a saved state.
+    :param path: The path to the saved state.
+    :param available_classes: The available classes.
+    :return: The loaded model.
+    """
+    state = torch.load(path, weights_only=True)
+    class_name = state.get("class_name", None)
+    if class_name is None:
+        raise Exception("No `class_name` field in saved model.")
+    try:
+        model_class = available_classes[class_name]
+    except Exception as e:
+        print("Class {} not found in provided dict.".format(class_name))
+        raise e
+    return model_class.load(path)
+
+
 class Model(Module):
 
     def __init__(self) -> None:
