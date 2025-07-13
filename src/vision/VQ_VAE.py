@@ -120,8 +120,14 @@ class VQ_VAE(Model):
         x_recon = self.decoder(z_q)
         return x_recon, vq_loss
 
+    def encode(self, input):
+        z_e = self.encoder(input)
+        z_q, _, _ = self.vq(z_e)
+        return z_q
+
     def export_hyperparam(self):
         return {
+            "class_name": self.__class__.__name__,
             "input_shape": self.input_shape,
             "hidden_dim": self.hidden_dim,
             "num_embed": self.num_embed,
