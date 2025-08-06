@@ -7,10 +7,11 @@ def flatten_vision_latents(z: torch.Tensor) -> torch.Tensor:
     return z.permute(0, 2, 3, 1).reshape(B, H * W, D)
 
 
+
+
 class MemoryModel:
     """
     The base class for memory (M) models.
     """
-
     def __init__(self) -> None:
         pass

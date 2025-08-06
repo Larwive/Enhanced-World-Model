@@ -4,7 +4,6 @@ from Model import Model
 from memory.CPC import info_nce_loss
 from memory.MemoryModel import flatten_vision_latents
 
-
 class WorldModel(Model):
 
     def __init__(self,
@@ -19,11 +18,18 @@ class WorldModel(Model):
                  cpc_args: dict | None = None) -> None:
         super().__init__()
         self.vision = vision_model(input_shape, **vision_args)
-        self.memory = memory_model(**memory_args)
-        self.controller = controller_model(**controller_args)
+        
+        # The input to the memory model is the output of the vision model
+        memory_input_dim = self.vision.embed_dim
+        self.memory = memory_model(input_dim=memory_input_dim, **memory_args)
+        
+        # The controller takes the output of both the vision and memory models
+        # Note: self.memory.transformer.d_model might be a more robust way to get h_dim
+        controller_h_dim = memory_args.get("d_model", 128) # Default to 128 if not specified
+        self.controller = controller_model(z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args)
 
         self.cpc_model = cpc_model
-        if cpc_args == None:
+        if cpc_args is None:
             cpc_args = {"context_dim": 128, "prediction_steps": 12}
         self.cpc_args = cpc_args
         if cpc_model is not None:
@@ -34,7 +40,10 @@ class WorldModel(Model):
     def forward(self, input, use_cpc: bool = False, return_losses: bool = False):
         recon, vq_loss = self.vision(input)
         z_q = self.vision.encode(input)
-        z_t = z_q.mean(dim=(2, 3))
+        
+        # For image-based models, z_q is (B, D, H, W). We need a vector for the memory model.
+        # For vector-based models (Identity), z_q is (B, D, 1, 1).
+        z_t = z_q.mean(dim=(2, 3)) # This works for both cases
 
         h_t = self.memory(z_t)
 
@@ -44,9 +53,7 @@ class WorldModel(Model):
             return action
 
         recon_loss = torch.nn.functional.mse_loss(recon, input)
-
         total_loss = recon_loss + vq_loss
-
         outputs = {"action": action, "recon_loss": recon_loss, "vq_loss": vq_loss, "total_loss": total_loss}
 
         if use_cpc and self.cpc is not None:
@@ -58,3 +65,6 @@ class WorldModel(Model):
             outputs["total_loss"] = total_loss
 
         return outputs
+
+    def export_hyperparam(self):
+      pass
