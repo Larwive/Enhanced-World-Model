@@ -6,9 +6,10 @@ import gymnasium as gym
 from interface.interface import GymEnvInterface
 from WorldModel import WorldModel
 
-def step(model, state, optimizer, device, is_image_based):
+
+def step(model, state, optimizer, device, is_image_based, action_space, reward):
     optimizer.zero_grad()
-    
+
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
         state_transposed = np.transpose(state, (2, 0, 1))
@@ -18,37 +19,42 @@ def step(model, state, optimizer, device, is_image_based):
     else:
         # For vector data, just add batch dimension and move to device
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
-    
-    output_dict = model(state_tensor, return_losses=True)
-    total_loss = torch.sum(output_dict["total_loss"])
+
+    output_dict = model(state_tensor, return_losses=True, action_space=action_space)
+    print(output_dict)
+    total_loss = torch.sum(output_dict["total_loss"]) - (reward * output_dict["log_probs"]).mean()
     total_loss.backward()
     optimizer.step()
-    
+
     return output_dict["action"], total_loss.item()
 
+
 def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu'):
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    print(model.parameters)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     is_image_based = len(interface.env.observation_space.shape) == 3
     action_space = interface.env.action_space
-    
+
+    last_reward = 0
+
     for iter_num in range(max_iter):
         state, info = interface.reset()
         done = False
         total_episode_loss = 0
-        
+
         while not done:
-            action_tensor, loss = step(model, state, optimizer, device, is_image_based)
-            
+            action_tensor, loss = step(model, state, optimizer, device, is_image_based, action_space, last_reward)
+
             # Handle different action spaces
             if isinstance(action_space, gym.spaces.Discrete):
                 action_np = action_tensor.argmax(dim=1).cpu().numpy()
-            else: # Continuous action space
+            else:  # Continuous action space
                 action_np = action_tensor.squeeze(0).cpu().detach().numpy()
 
-            next_state, reward, done, info = interface.step(action_np)
+            next_state, last_reward, done, info = interface.step(action_np)
             state = next_state
             total_episode_loss += loss
             if interface.env.render_mode == 'human':
                 interface.render()
-            
+
         print(f"Iteration {iter_num + 1}/{max_iter}, Total Loss: {total_episode_loss:.4f}")
