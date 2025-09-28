@@ -70,9 +70,9 @@ def step(model,
     return output_dict["action"], total_loss.item()
 
 
-def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True):
+def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate:float = 0.01):
     print(model.parameters)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     is_image_based = len(interface.env.observation_space.shape) == 3
     action_space = interface.env.action_space
 
