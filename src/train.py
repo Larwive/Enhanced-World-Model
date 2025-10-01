@@ -40,10 +40,7 @@ def step(model,
          reward,
          iter_num: int = 0,
          tensorboard_writer=None):
-    print("----- STEP -----")
     optimizer.zero_grad()
-    print("OPTIMIZER ZERO GRAD")
-    print("------------------ STATE ------------------")
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
         state_transposed = np.transpose(state, (2, 0, 1))
@@ -53,12 +50,10 @@ def step(model,
     else:
         # For vector data, just add batch dimension and move to device
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
-    print("------------------- STATE TENSOR ------------------")
 
     output_dict = model(state_tensor, return_losses=True, action_space=action_space)
     print(output_dict)
     total_loss = torch.sum(output_dict["total_loss"]) - (reward * output_dict["log_probs"]).mean()
-    print("The loss is --------------------------",total_loss.grad_fn, total_loss.item())
 
     if tensorboard_writer is not None:
         tensorboard_writer.add_scalar("train/loss", total_loss.item(), iter_num)
