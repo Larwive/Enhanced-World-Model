@@ -5,6 +5,7 @@ __pycache__/
 __pycache__
 
 *.*env
+runs/
 # C extensions
 *.so
 
