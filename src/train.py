@@ -41,7 +41,6 @@ def step(model,
          iter_num: int = 0,
          tensorboard_writer=None):
     optimizer.zero_grad()
-
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
         state_transposed = np.transpose(state, (2, 0, 1))
