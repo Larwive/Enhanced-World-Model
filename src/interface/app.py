@@ -48,7 +48,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
             env_name = gr.Dropdown(
-                choices=get_all_gym_envs(), label="Environment Name", value="CarRacing-v2"
+                choices=get_all_gym_envs(), label="Environment Name", value="CarRacing-v3"
             )
             random_seed = gr.Number(label="Random Seed", value=42)
             max_epoch = gr.Number(label="Max Epochs", value=200)
