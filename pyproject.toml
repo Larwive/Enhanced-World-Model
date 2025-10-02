@@ -3,13 +3,16 @@ name = "enhanced-world-model"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11, <=3.12"
+requires-python = ">=3.11, <=3.12.11"
 dependencies = [
     "gymnasium[all]>=1.2.0",
-    "matplotlib>=3.10.3",
+    "matplotlib>=3.8.0",
     "numpy>=2.3.1",
     "tensorboard>=2.20.0",
-    "torch>=2.7.1",
+    "torch>=2.8.0",
     "torchvision>=0.22.1",
     "gradio>=4.39.0",
 ]
+
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/nightly/cu130"]
