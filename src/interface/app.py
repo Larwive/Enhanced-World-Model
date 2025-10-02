@@ -8,6 +8,8 @@ def get_all_gym_envs():
     """Returns a list of all registered gym environments."""
     return list(registry.keys())
 
+current_process = {"process": None}
+
 def launch_training(
     env_name,
     random_seed,
@@ -39,8 +41,15 @@ def launch_training(
         "--render-mode",
         "human" if render_mode else "rgb_array",
     ]
-    subprocess.Popen(cmd)
+    current_process["process"]=subprocess.Popen(cmd)
     return "Training launched!"
+
+def cancel_training():
+    if current_process["process"]:
+        current_process["process"].terminate()
+        current_process["process"] = None
+        return "Training stopped!"
+    return "No training process to stop!"
 
 with gr.Blocks() as demo:
     gr.Markdown("# World Model Training Interface")
@@ -58,6 +67,7 @@ with gr.Blocks() as demo:
             dropout = gr.Slider(0, 1, label="Dropout", value=0.2)
             render_mode = gr.Checkbox(label="Enable Graphics", value=True)
             launch_button = gr.Button("Launch Training")
+            cancel_button = gr.Button("Cancel Training")
 
     output = gr.Textbox(label="Status")
 
@@ -75,6 +85,8 @@ with gr.Blocks() as demo:
         ],
         outputs=output,
     )
+    
+    cancel_button.click(fn=cancel_training, outputs=output)
 
 if __name__ == "__main__":
     demo.launch()
