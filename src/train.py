@@ -52,25 +52,24 @@ def step(model,
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
     output_dict = model(state_tensor, return_losses=True, action_space=action_space)
-    print(output_dict)
+    # print(output_dict)
     total_loss = torch.sum(output_dict["total_loss"]) - (reward * output_dict["log_probs"]).mean()
+
+    total_loss.backward()
 
     if tensorboard_writer is not None:
         tensorboard_writer.add_scalar("train/loss", total_loss.item(), iter_num)
         for name, param in model.named_parameters():
-            if param.grad is not None:
-                tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
-            else:
-                print("ERROR IN GRADIENTS ! {} is None".format(name))
+            assert param is not None, "Parameter {} is None".format(name)
+            tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
-    total_loss.backward()
     optimizer.step()
 
     return output_dict["action"], total_loss.item()
 
 
 def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate:float = 0.01):
-    print(model.parameters)
+    # print(model.parameters)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     is_image_based = len(interface.env.observation_space.shape) == 3
     action_space = interface.env.action_space
