@@ -1,3 +1,5 @@
+# src/vision/VQ_VAE.py
+
 import torch
 import torch.nn.functional as F
 
@@ -118,12 +120,11 @@ class VQ_VAE(Model):
         z_e = self.encoder(input)
         z_q, vq_loss, _ = self.vq(z_e)
         x_recon = self.decoder(z_q)
-        return x_recon, vq_loss
-
-    def encode(self, input):
-        z_e = self.encoder(input)
-        z_q, _, _ = self.vq(z_e)
-        return z_q
+        return {
+            "recon": x_recon,
+            "vq_loss": vq_loss,
+            "z_q": z_q
+        }
 
     def export_hyperparam(self):
         return {
