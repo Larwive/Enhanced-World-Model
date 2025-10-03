@@ -1,10 +1,12 @@
+# src/controller/StochasticController.py
+
 import torch
+from torch.distributions import Normal, TransformedDistribution
+from torch.distributions.transforms import TanhTransform
 
 from Model import Model
 
-
 class StochasticController(Model):
-
     def __init__(self, z_dim, h_dim, action_dim):
         super().__init__()
         self.fc_mean = torch.nn.Linear(z_dim + h_dim, action_dim)
@@ -12,9 +14,26 @@ class StochasticController(Model):
 
     def forward(self, z_t, h_t):
         x = torch.cat([z_t, h_t], dim=-1)
-        mu = self.fc_mean(x)  # Mean of Gaussian
-        std = torch.exp(self.log_std)  # Std of Gaussian
-        dist = torch.distributions.Normal(mu, std)
-        action = dist.rsample()  # Reparameterized sample
-        log_prob = dist.log_prob(action).sum(-1)  # Sum over action dimensions
+        mu = self.fc_mean(x)
+        std = torch.exp(self.log_std)
+
+        # Create a Normal distribution and apply a Tanh transform to squash actions to [-1, 1]
+        base_dist = Normal(mu, std)
+        # The Tanh transform squashes the output to the range [-1, 1]
+        # The Affine transform can then scale and shift it to the environment's action space
+        # For now, we'll let the WorldModel handle final scaling if necessary.
+        transform = TanhTransform(cache_size=1)
+        action_dist = TransformedDistribution(base_dist, transform)
+
+        # rsample() gets a sample that gradients can flow through
+        action = action_dist.rsample()
+
+        # log_prob() correctly computes the log probability of the squashed action
+        log_prob = action_dist.log_prob(action).sum(-1)
+
         return action, log_prob
+
+    def export_hyperparam(self):
+        return {
+            "class_name": self.__class__.__name__,
+        }

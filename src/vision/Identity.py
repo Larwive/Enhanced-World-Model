@@ -15,12 +15,12 @@ class Identity(Model):
         self.embed_dim = input_shape[0]
 
     def forward(self, input):
-        # Return the input as the "reconstruction" and a zero loss
-        return input, torch.tensor(0.0, device=input.device)
-
-    def encode(self, input):
-        # The "encoded" version is just the input itself
-        return input.unsqueeze(-1).unsqueeze(-1) # Add dummy H, W dims for flatten_vision_latents
+        # Return a dictionary consistent with VQ_VAE
+        return {
+            "recon": input,
+            "vq_loss": torch.tensor(0.0, device=input.device),
+            "z_q": input.unsqueeze(-1).unsqueeze(-1)  # Add dummy H, W dims for flatten_vision_latents
+        }
 
     def export_hyperparam(self):
         return {

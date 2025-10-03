@@ -39,7 +39,7 @@ def launch_training(
         "--dropout",
         str(dropout),
         "--render-mode",
-        "human" if render_mode else "rgb_array",
+        "human" if render_mode else "rgb_array_list",
     ]
     current_process["process"]=subprocess.Popen(cmd)
     return "Training launched!"
