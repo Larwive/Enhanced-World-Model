@@ -12,8 +12,9 @@ class CPC(Model):
         self.predictors = torch.nn.ModuleList(
             [torch.nn.Linear(context_dim, latent_dim) for _ in range(prediction_steps)])
 
-    def forward(self, z_seq: torch.Tensor):
+    def forward(self, input: torch.Tensor):
         # z_seq: (B, T, D)
+        z_seq = input
         context, _ = self.gru(z_seq)
         predictions = [W(context) for W in self.predictors]
         return predictions
@@ -35,4 +36,5 @@ def info_nce_loss(z_seq, predictions, k_steps=12):
 
         loss = torch.nn.functional.cross_entropy(logits, labels)
         total_loss += loss
+        print(f"Step {k}, Loss: {loss.item()} {total_loss.item()}")
     return total_loss / k_steps
