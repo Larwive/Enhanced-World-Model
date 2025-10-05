@@ -11,7 +11,6 @@ def squash_to_action_space(raw_action, action_space):
     """
     low = torch.as_tensor(action_space.low, dtype=torch.float32, device=raw_action.device)
     high = torch.as_tensor(action_space.high, dtype=torch.float32, device=raw_action.device)
-    high[2] = 0
     scaled = torch.sigmoid(raw_action) * (high - low) + low
     return scaled
 
@@ -57,7 +56,7 @@ class WorldModel(Model):
         # For vector-based models (Identity), z_q is (B, D, 1, 1).
         z_t = z_q.mean(dim=(2, 3))  # This works for both cases
 
-        h_t = self.memory(z_t)
+        h_t = self.memory(z_t.detach().clone())
 
         action, log_probs = self.controller(z_t, h_t)
 

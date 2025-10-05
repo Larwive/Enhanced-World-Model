@@ -60,7 +60,8 @@ def step(model,
     if tensorboard_writer is not None:
         tensorboard_writer.add_scalar("train/loss", total_loss.item(), iter_num)
         for name, param in model.named_parameters():
-            assert param is not None, "Parameter {} is None".format(name)
+            if iter_num and torch.isclose(torch.zeros_like(param.grad.norm()), param.grad.norm()): # Will ideally be removed in the future.
+                print("{}'s gradient is low ! ({})".format(name, param.grad.norm().item()))
             tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
