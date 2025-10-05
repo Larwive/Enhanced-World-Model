@@ -45,7 +45,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--learning-rate', type=float, default=1e-3)
     parser.add_argument('--dropout', type=float, default=0.2)
-    parser.add_argument('--save-path', default='../saved_models/')
+    parser.add_argument('--save-path', default='./saved_models/')
     parser.add_argument('--load-path', default='TOFILL')
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--render-mode', type=str, default='human')
