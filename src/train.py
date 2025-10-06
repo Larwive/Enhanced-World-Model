@@ -53,15 +53,14 @@ def step(model,
 
     output_dict = model(state_tensor, return_losses=True, action_space=action_space)
     # print(output_dict)
-    total_loss = torch.sum(output_dict["total_loss"]) - (reward * output_dict["log_probs"]).mean()
-
+    total_loss = torch.abs(torch.sum(output_dict["total_loss"]) - output_dict["log_probs"]).mean() * reward
     total_loss.backward()
 
     if tensorboard_writer is not None:
         tensorboard_writer.add_scalar("train/loss", total_loss.item(), iter_num)
         for name, param in model.named_parameters():
-            if iter_num and torch.isclose(torch.zeros_like(param.grad.norm()), param.grad.norm()): # Will ideally be removed in the future.
-                print("{}'s gradient is low ! ({})".format(name, param.grad.norm().item()))
+            #if iter_num and torch.isclose(torch.zeros_like(param.grad.norm()), param.grad.norm()): # Will ideally be removed in the future.
+            #    print("{}'s gradient is low ! ({})".format(name, param.grad.norm().item()))
             tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
@@ -78,7 +77,6 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
     writer = SummaryWriter() if use_tensorboard else None
 
     last_reward = 0
-
     for iter_num in range(max_iter):
         state, info = interface.reset()
         done = False
@@ -97,7 +95,8 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
 
             # Handle different action spaces
             if isinstance(action_space, gym.spaces.Discrete):
-                action_np = action_tensor.argmax(dim=1).cpu().numpy()
+                raw_action_np = np.int64(np.round(action_tensor.detach().cpu().numpy()))
+                action_np = np.clip(raw_action_np, 0, action_space.n - 1)  # Not using `describe_action_space`
             else:  # Continuous action space
                 action_np = action_tensor.squeeze(0).cpu().detach().numpy()
 
