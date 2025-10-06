@@ -27,8 +27,7 @@ class StochasticController(Model):
         action_dist = TransformedDistribution(base_dist, transform)
 
         # rsample() gets a sample that gradients can flow through
-        action = action_dist.rsample()
-
+        action = action_dist.sample()
         # log_prob() correctly computes the log probability of the squashed action
         log_prob = action_dist.log_prob(action).sum(-1)
 
