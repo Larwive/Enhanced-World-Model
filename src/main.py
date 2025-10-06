@@ -16,10 +16,12 @@ from controller.ModelPredictiveController import ModelPredictiveController
 from controller.StochasticController import StochasticController
 from WorldModel import WorldModel
 from train import train
-
+from reward_predictor.LinearPredictor import LinearPredictorModel
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device(
     "cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+torch.set_default_device(device)
 
 # Setup logging to file and console
 logging.basicConfig(
@@ -102,8 +104,10 @@ def main():
             controller_args=controller_args,
         ).to(device)
 
+        reward_predictor = world_model.get_reward_predictor(LinearPredictorModel)
+
         # Start training
-        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
+        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, reward_predictor_model=reward_predictor)
 
         # Save the trained model
         world_model.save(f"{args.save_path}{args.env_name}_world_model.pt")
