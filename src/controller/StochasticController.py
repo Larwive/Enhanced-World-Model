@@ -9,7 +9,7 @@ from Model import Model
 
 class StochasticController(Model):
 
-    def __init__(self, z_dim, h_dim, action_dim):
+    def __init__(self, z_dim, h_dim, action_dim, **_kwargs):
         super().__init__()
         self.fc_mean = torch.nn.Linear(z_dim + h_dim, action_dim)
         self.log_std = torch.nn.Parameter(torch.zeros(action_dim))  # learnable std
