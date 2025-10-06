@@ -45,7 +45,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--learning-rate', type=float, default=1e-3)
     parser.add_argument('--dropout', type=float, default=0.2)
-    parser.add_argument('--save-path', default='../saved_models/')
+    parser.add_argument('--save-path', default='./saved_models/')
     parser.add_argument('--load-path', default='TOFILL')
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--render-mode', type=str, default='human')
@@ -84,7 +84,7 @@ def main():
         # Configure memory and controller based on environment
         action_space = interface.env.action_space
         if isinstance(action_space, gym.spaces.Discrete):
-            action_dim = action_space.n
+            action_dim = 1  # action_space.n is actually the number of possible values
         else:  # Box, etc.
             action_dim = action_space.shape[0]
 
