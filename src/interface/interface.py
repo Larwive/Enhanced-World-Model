@@ -9,9 +9,9 @@ class GymEnvInterface:
         self.state, self.info = self.env.reset()
         self.done = False
 
-    def reset(self):
+    def reset(self, **kwargs):
         """Resets the environment and returns the initial state and info."""
-        self.state, self.info = self.env.reset()
+        self.state, self.info = self.env.reset(**kwargs)
         self.done = False
         # Return both the state and the info dictionary
         return self.state, self.info
