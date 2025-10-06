@@ -85,7 +85,9 @@ class WorldModel(Model):
 
         # The controller takes the output of both the vision and memory models
         # Note: self.memory.transformer.d_model might be a more robust way to get h_dim
-        controller_h_dim = memory_args.get("d_model", 128)  # Default to 128 if not specified
+        self.memory_d_model = memory_args.get("d_model", 128) # Default to 128 if not specified
+        self.action_dim = controller_args["action_dim"]
+        controller_h_dim = self.memory_d_model
         self.controller = controller_model(z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args)
 
         self.cpc_model = cpc_model
@@ -97,7 +99,7 @@ class WorldModel(Model):
         else:
             self.cpc = None
 
-    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False):
+    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False, reward_predictor_model: Model=None):
         recon, vq_loss = self.vision(input)
         z_q = self.vision.encode(input)
 
@@ -132,7 +134,13 @@ class WorldModel(Model):
             outputs["cpc_loss"] = cpc_loss
             outputs["total_loss"] = total_loss
 
+        if reward_predictor_model:
+            # Need to detach and clone h_t ?
+            outputs["predicted_reward"] = reward_predictor_model(z_t.detach().clone(), h_t, log_probs)
         return outputs
 
     def export_hyperparam(self):
         pass
+
+    def get_reward_predictor(self, reward_predictor_class: Model, **kwargs):
+        return reward_predictor_class(z_dim=self.vision.embed_dim, h_dim=self.memory_d_model, action_dim=self.action_dim, **kwargs)

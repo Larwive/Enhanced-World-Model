@@ -8,7 +8,7 @@ from torch.utils.tensorboard.summary import hparams
 
 from interface.interface import GymEnvInterface
 from WorldModel import WorldModel
-
+from Model import Model
 
 class SummaryWriter(SummaryWriter):
     """
@@ -39,7 +39,8 @@ def step(model,
          action_space,
          reward,
          iter_num: int = 0,
-         tensorboard_writer=None):
+         tensorboard_writer=None,
+         reward_predictor_model: Model=None):
     optimizer.zero_grad()
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
@@ -51,9 +52,14 @@ def step(model,
         # For vector data, just add batch dimension and move to device
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
-    output_dict = model(state_tensor, return_losses=True, action_space=action_space)
+    output_dict = model(state_tensor, return_losses=True, action_space=action_space, reward_predictor_model=reward_predictor_model)
     # print(output_dict)
-    total_loss = torch.abs(torch.sum(output_dict["total_loss"]) - output_dict["log_probs"]).mean() * reward
+    total_loss = torch.sum(output_dict["total_loss"]) # - output_dict["log_probs"]).mean() * reward
+    if reward_predictor_model:
+        predicted_reward = output_dict["predicted_reward"]
+        total_loss = total_loss - predicted_reward + torch.abs(reward - predicted_reward)
+
+    #total_loss = torch.abs(total_loss)
     total_loss.backward()
 
     if tensorboard_writer is not None:
@@ -62,13 +68,16 @@ def step(model,
             #if iter_num and torch.isclose(torch.zeros_like(param.grad.norm()), param.grad.norm()): # Will ideally be removed in the future.
             #    print("{}'s gradient is low ! ({})".format(name, param.grad.norm().item()))
             tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
+        if reward_predictor_model:
+            for name, param in reward_predictor_model.named_parameters():
+                tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
 
     return output_dict["action"], total_loss.item()
 
 
-def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate:float = 0.01):
+def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, reward_predictor_model: Model=None):
     # print(model.parameters)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     is_image_based = len(interface.env.observation_space.shape) == 3
@@ -91,7 +100,8 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
                                        action_space,
                                        last_reward,
                                        iter_num=iter_num,
-                                       tensorboard_writer=writer)
+                                       tensorboard_writer=writer,
+                                       reward_predictor_model=reward_predictor_model)
 
             # Handle different action spaces
             if isinstance(action_space, gym.spaces.Discrete):
