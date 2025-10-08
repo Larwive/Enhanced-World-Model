@@ -52,12 +52,13 @@ def step(model,
         # For vector data, just add batch dimension and move to device
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
-    output_dict = model(state_tensor, return_losses=True, action_space=action_space, reward_predictor_model=reward_predictor_model)
-    # print(output_dict)
-    total_loss = torch.sum(output_dict["total_loss"]) # - output_dict["log_probs"]).mean() * reward
+    output_dict = model(state_tensor, return_losses=True, action_space=action_space, reward_predictor_model=reward_predictor_model, last_reward=torch.tensor([reward], dtype=torch.get_default_dtype(), requires_grad=True))
+    total_loss = torch.sum(output_dict["total_loss"]) # - output_dict["log_probs"].mean() * reward
+
     if reward_predictor_model:
         predicted_reward = output_dict["predicted_reward"]
-        total_loss = total_loss - predicted_reward + torch.abs(reward - predicted_reward)
+        print(reward, predicted_reward.detach().item())
+        total_loss = total_loss + (1 * (reward - predicted_reward) ** 2 / predicted_reward * 0.01)
 
     #total_loss = torch.abs(total_loss)
     total_loss.backward()
@@ -79,13 +80,13 @@ def step(model,
 
 def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, reward_predictor_model: Model=None):
     # print(model.parameters)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     is_image_based = len(interface.env.observation_space.shape) == 3
     action_space = interface.env.action_space
 
     writer = SummaryWriter() if use_tensorboard else None
 
-    last_reward = 0
+    cumulated_reward = 0
     for iter_num in range(max_iter):
         state, info = interface.reset()
         done = False
@@ -98,7 +99,7 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
                                        device,
                                        is_image_based,
                                        action_space,
-                                       last_reward,
+                                       cumulated_reward,
                                        iter_num=iter_num,
                                        tensorboard_writer=writer,
                                        reward_predictor_model=reward_predictor_model)
@@ -110,10 +111,13 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
             else:  # Continuous action space
                 action_np = action_tensor.squeeze(0).cpu().detach().numpy()
 
-            next_state, last_reward, done, info = interface.step(action_np)
+            next_state, step_reward, done, info = interface.step(action_np)
             state = next_state
             total_episode_loss += loss
             if interface.env.render_mode == 'human':
                 interface.render()
-
+            if done:
+                cumulated_reward = 0
+            else:
+                cumulated_reward += step_reward
         print(f"Iteration {iter_num + 1}/{max_iter}, Total Loss: {total_episode_loss:.4f}")
