@@ -17,11 +17,14 @@ from controller.StochasticController import StochasticController
 from WorldModel import WorldModel
 from train import train
 from reward_predictor.LinearPredictor import LinearPredictorModel
+from reward_predictor.DensePredictor import DensePredictorModel
+
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device(
     "cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 torch.set_default_device(device)
+torch.set_default_dtype(torch.float32)
 
 # Setup logging to file and console
 logging.basicConfig(
@@ -104,7 +107,7 @@ def main():
             controller_args=controller_args,
         ).to(device)
 
-        reward_predictor = world_model.get_reward_predictor(LinearPredictorModel)
+        reward_predictor = world_model.get_reward_predictor(DensePredictorModel)
 
         # Start training
         train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, reward_predictor_model=reward_predictor)
