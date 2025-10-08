@@ -99,7 +99,7 @@ class WorldModel(Model):
         else:
             self.cpc = None
 
-    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False, reward_predictor_model: Model=None):
+    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False, reward_predictor_model: Model=None, last_reward=None):
         recon, vq_loss = self.vision(input)
         z_q = self.vision.encode(input)
 
@@ -134,9 +134,9 @@ class WorldModel(Model):
             outputs["cpc_loss"] = cpc_loss
             outputs["total_loss"] = total_loss
 
-        if reward_predictor_model:
+        if reward_predictor_model and last_reward is not None:
             # Need to detach and clone h_t ?
-            outputs["predicted_reward"] = reward_predictor_model(z_t.detach().clone(), h_t, log_probs)
+            outputs["predicted_reward"] = reward_predictor_model(z_t.detach().clone(), h_t, log_probs, last_reward)
         return outputs
 
     def export_hyperparam(self):
