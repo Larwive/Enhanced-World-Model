@@ -5,6 +5,7 @@ import numpy as np
 import gymnasium as gym
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard.summary import hparams
+from torch.nn import MSELoss
 
 from interface.interface import GymEnvInterface
 from WorldModel import WorldModel
@@ -33,15 +34,20 @@ class SummaryWriter(SummaryWriter):
 
 def step(model,
          state,
+         interface,
          optimizer,
          device,
          is_image_based,
          action_space,
-         reward,
+         cumulated_reward,
          iter_num: int = 0,
          tensorboard_writer=None,
-         reward_predictor_model: Model=None):
+         reward_predictor_model: Model=None,
+         loss_instance=None):
+    if loss_instance is None:
+        loss_instance = MSELoss()  # Same as below.
     optimizer.zero_grad()
+
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
         state_transposed = np.transpose(state, (2, 0, 1))
@@ -52,12 +58,29 @@ def step(model,
         # For vector data, just add batch dimension and move to device
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
-    output_dict = model(state_tensor, return_losses=True, action_space=action_space, reward_predictor_model=reward_predictor_model)
-    # print(output_dict)
-    total_loss = torch.sum(output_dict["total_loss"]) # - output_dict["log_probs"]).mean() * reward
+    last_reward = torch.tensor([cumulated_reward], dtype=torch.get_default_dtype())
+    output_dict = model(state_tensor, return_losses=True, action_space=action_space, reward_predictor_model=reward_predictor_model, last_reward=cumulated_reward)
+    total_loss = torch.sum(output_dict["total_loss"]) # - output_dict["log_probs"].mean() * reward
+
+
+    # Handle different action spaces
+    if isinstance(action_space, gym.spaces.Discrete):
+        raw_action_np = np.int64(np.round(output_dict["action"].detach().cpu().numpy()))
+        action_np = np.clip(raw_action_np, 0, action_space.n - 1)  # Not using `describe_action_space`
+    else:  # Continuous action space
+        action_np = output_dict["action"].squeeze(0).cpu().detach().numpy()
+
+    new_state, step_reward, done, info = interface.step(action_np)
+
+    if done:
+        cumulated_reward = torch.tensor([step_reward], dtype=torch.get_default_dtype())
+    else:
+        cumulated_reward += step_reward
+
     if reward_predictor_model:
         predicted_reward = output_dict["predicted_reward"]
-        total_loss = total_loss - predicted_reward + torch.abs(reward - predicted_reward)
+        #print(cumulated_reward, predicted_reward.detach().item())
+        total_loss = total_loss + loss_instance(predicted_reward.squeeze(0), cumulated_reward) / predicted_reward
 
     #total_loss = torch.abs(total_loss)
     total_loss.backward()
@@ -74,46 +97,40 @@ def step(model,
 
     optimizer.step()
 
-    return output_dict["action"], total_loss.item()
+    return cumulated_reward, total_loss.item(), new_state, done
 
 
-def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, reward_predictor_model: Model=None):
+def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, reward_predictor_model: Model=None, loss_func: callable=MSELoss):
     # print(model.parameters)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    parameters = list(model.parameters()) + list(reward_predictor_model.parameters()) if reward_predictor_model is not None else []
+    optimizer = torch.optim.AdamW(parameters, lr=learning_rate)
+    loss_func = loss_func()  # Add potential args here.
     is_image_based = len(interface.env.observation_space.shape) == 3
     action_space = interface.env.action_space
 
     writer = SummaryWriter() if use_tensorboard else None
 
-    last_reward = 0
+    cumulated_reward = torch.tensor([0], dtype=torch.get_default_dtype())
     for iter_num in range(max_iter):
         state, info = interface.reset()
         done = False
         total_episode_loss = 0
 
         while not done:
-            action_tensor, loss = step(model,
+            cumulated_reward, loss, state, done = step(model,
                                        state,
+                                       interface,
                                        optimizer,
                                        device,
                                        is_image_based,
                                        action_space,
-                                       last_reward,
+                                       cumulated_reward,
                                        iter_num=iter_num,
                                        tensorboard_writer=writer,
-                                       reward_predictor_model=reward_predictor_model)
+                                       reward_predictor_model=reward_predictor_model,
+                                       loss_instance=loss_func)
 
-            # Handle different action spaces
-            if isinstance(action_space, gym.spaces.Discrete):
-                raw_action_np = np.int64(np.round(action_tensor.detach().cpu().numpy()))
-                action_np = np.clip(raw_action_np, 0, action_space.n - 1)  # Not using `describe_action_space`
-            else:  # Continuous action space
-                action_np = action_tensor.squeeze(0).cpu().detach().numpy()
-
-            next_state, last_reward, done, info = interface.step(action_np)
-            state = next_state
             total_episode_loss += loss
             if interface.env.render_mode == 'human':
                 interface.render()
-
-        print(f"Iteration {iter_num + 1}/{max_iter}, Total Loss: {total_episode_loss:.4f}")
+        print(f"Iteration {iter_num + 1}/{max_iter}, Mean Loss: {total_episode_loss/(iter_num + 1):.4f}")
