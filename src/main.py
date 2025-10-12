@@ -17,11 +17,14 @@ from controller.StochasticController import StochasticController
 from WorldModel import WorldModel
 from train import train
 from reward_predictor.LinearPredictor import LinearPredictorModel
+from reward_predictor.DensePredictor import DensePredictorModel
+
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device(
     "cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 torch.set_default_device(device)
+torch.set_default_dtype(torch.float32)
 
 # Setup logging to file and console
 logging.basicConfig(
