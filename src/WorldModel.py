@@ -5,6 +5,11 @@ from Model import Model
 from memory.CPC import info_nce_loss
 from memory.MemoryModel import flatten_vision_latents
 
+import vision
+import memory
+import controller
+import reward_predictor
+
 def describe_action_space(space):
     if isinstance(space, gym.spaces.Discrete):
         return {
@@ -77,6 +82,8 @@ class WorldModel(Model):
                  cpc_model: Model | None = None,
                  cpc_args: dict | None = None) -> None:
         super().__init__()
+        self.iter_num = 0  # The number of training iterations tied to this model.
+        self.nb_experiments = 0
         self.vision = vision_model(input_shape, **vision_args)
 
         # The input to the memory model is the output of the vision model
@@ -90,16 +97,16 @@ class WorldModel(Model):
         controller_h_dim = self.memory_d_model
         self.controller = controller_model(z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args)
 
-        self.cpc_model = cpc_model
         if cpc_args is None:
             cpc_args = {"context_dim": 128, "prediction_steps": 12}
-        self.cpc_args = cpc_args
         if cpc_model is not None:
             self.cpc = cpc_model(self.vision.embed_dim, **cpc_args)
         else:
             self.cpc = None
 
-    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False, reward_predictor_model: Model=None, last_reward=None):
+        self.reward_predictor = None
+
+    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False, last_reward=None):
         recon, vq_loss = self.vision(input)
         z_q = self.vision.encode(input)
 
@@ -134,13 +141,69 @@ class WorldModel(Model):
             outputs["cpc_loss"] = cpc_loss
             outputs["total_loss"] = total_loss
 
-        if reward_predictor_model and last_reward is not None:
+        if self.reward_predictor and last_reward is not None:
             # Need to detach and clone h_t ?
-            outputs["predicted_reward"] = reward_predictor_model(z_t.detach().clone(), h_t, log_probs, last_reward)
+            outputs["predicted_reward"] = self.reward_predictor(z_t.detach().clone(), h_t, log_probs, last_reward)
         return outputs
 
-    def export_hyperparam(self):
+    def export_hyperparams(self):
         pass
 
-    def get_reward_predictor(self, reward_predictor_class: Model, **kwargs):
-        return reward_predictor_class(z_dim=self.vision.embed_dim, h_dim=self.memory_d_model, action_dim=self.action_dim, **kwargs)
+    def save(self, path, obs_space, action_space):
+        saving_dict = {
+                   "iter_num": self.iter_num,
+                   "nb_experiments": self.nb_experiments,
+                   "obs_space": obs_space,
+                   "action_space": action_space,
+
+                   "vision_model": self.vision.__class__.__name__,
+                   "vision_args": self.vision.export_hyperparams(),
+                   "vision_dict": self.vision.save_state(),
+
+                   "memory_model": self.memory.__class__.__name__,
+                   "memory_args": self.memory.export_hyperparams(),
+                   "memory_dict": self.memory.save_state(),
+
+                   "controller_model": self.controller.__class__.__name__,
+                   "controller_args": self.controller.export_hyperparams(),
+                   "controller_dict": self.controller.save_state(),
+                  }
+
+        if self.cpc is not None:
+            saving_dict["cpc_model"] = self.cpc.__class__.__name__
+            saving_dict["cpc_args"] = self.cpc.export_hyperparams()
+            saving_dict["cpc_dict"] = self.cpc.save_state()
+
+        if self.reward_predictor is not None:
+            saving_dict["reward_predictor_model"] = self.reward_predictor.__class__.__name__
+            saving_dict["reward_predictor_args"] = self.reward_predictor.export_hyperparams()
+            saving_dict["reward_predictor_dict"] = self.reward_predictor.save_state()
+        torch.save(saving_dict, path)
+
+    def load(self, path, obs_space, action_space):
+        # TODO: Check input/output shape consistencies between components before loading the weights ?
+        saved_dict = torch.load(path, weights_only=False)
+
+        assert obs_space == saved_dict["obs_space"] and action_space == saved_dict["action_space"], "Obeservation space and/or action space of the saved model do not match those of the current environment."
+        self.iter_num = saved_dict["iter_num"]
+        self.nb_experiments = saved_dict["nb_experiments"]
+
+        self.vision = getattr(vision, saved_dict["vision_model"])(**saved_dict["vision_args"])
+        self.vision.load(saved_dict["vision_dict"])
+
+        self.memory = getattr(memory, saved_dict["memory_model"])(**saved_dict["memory_args"])
+        self.memory.load(saved_dict["memory_dict"])
+
+        self.controller = getattr(controller, saved_dict["controller_model"])(**saved_dict["controller_args"])
+        self.controller.load(saved_dict["controller_dict"])
+
+        if "CPC_dict" in saved_dict:
+            self.cpc = getattr(memory, saved_dict["cpc_model"])(**saved_dict["cpc_args"])
+            self.cpc.load(saved_dict["cpc_dict"])
+        if "reward_predictor_dict" in saved_dict:
+            self.reward_predictor = getattr(reward_predictor, saved_dict["reward_predictor_model"])(**saved_dict["reward_predictor_args"])
+            self.reward_predictor.load(saved_dict["reward_predictor_dict"])
+
+    def set_reward_predictor(self, reward_predictor_class: Model, **kwargs):
+        self.reward_predictor = reward_predictor_class(z_dim=self.vision.embed_dim, h_dim=self.memory_d_model, action_dim=self.action_dim, **kwargs)
+
