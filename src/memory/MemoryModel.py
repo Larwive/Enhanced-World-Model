@@ -11,7 +11,7 @@ def flatten_vision_latents(z: torch.Tensor) -> torch.Tensor:
 
 class MemoryModel:
     """
-    The base class for memory (M) models.
+    The base class for memory (M) models. (Useless ?)
     """
     def __init__(self) -> None:
         pass

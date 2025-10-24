@@ -48,10 +48,10 @@ def main():
     parser.add_argument('--max-epoch', type=int, default=200)
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--batch-size', type=int, default=64)
-    parser.add_argument('--learning-rate', type=float, default=1e-3)
+    parser.add_argument('--learning-rate', type=float, default=1e-4)
     parser.add_argument('--dropout', type=float, default=0.2)
     parser.add_argument('--save-path', default='./saved_models/')
-    parser.add_argument('--load-path', default='TOFILL')
+    parser.add_argument('--load-path', default='')
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--render-mode', type=str, default='human')
     args = parser.parse_args()
@@ -107,13 +107,18 @@ def main():
             controller_args=controller_args,
         ).to(device)
 
-        reward_predictor = world_model.get_reward_predictor(LinearPredictorModel)
+        world_model.set_reward_predictor(DensePredictorModel)
+
+        if args.load_path:
+            print("Loading model...")
+            world_model.load(args.load_path, obs_space=obs_space, action_space=action_space)
+
 
         # Start training
-        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, reward_predictor_model=reward_predictor)
+        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
 
         # Save the trained model
-        world_model.save(f"{args.save_path}{args.env_name}_world_model.pt")
+        world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
 
         logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")
 

@@ -6,6 +6,11 @@ from Model import Model
 class DensePredictorModel(Model):
     def __init__(self, z_dim, h_dim, action_dim=None, **_kwargs):
         super().__init__()
+
+        self.z_dim = z_dim
+        self.h_dim = h_dim
+        self.action_dim = action_dim
+
         input_dim = z_dim + h_dim + 2  # Need formal proof.
 
         self.net = nn.Sequential( # Hard coded for now.
@@ -26,5 +31,15 @@ class DensePredictorModel(Model):
         x = torch.cat([z_t, h_t, log_prob, last_reward], dim=-1)
         return self.net(x)
 
-    def export_hyperparam(self):
-        pass
+    def export_hyperparams(self):
+        return {
+            "z_dim": self.z_dim,
+            "h_dim": self.h_dim,
+            "action_dim": self.action_dim
+        }
+
+    def save_state(self):
+        return self.state_dict()
+
+    def load(self, state_dict):
+        self.load_state_dict(state_dict)
