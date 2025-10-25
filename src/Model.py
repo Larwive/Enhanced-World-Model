@@ -39,7 +39,7 @@ class Model(Module):
         pass
 
     @abc.abstractmethod
-    def export_hyperparam(self) -> dict:
+    def export_hyperparams(self) -> dict:
         """
         Export model hyperparameters for saving or logging.
         """
@@ -53,18 +53,13 @@ class Model(Module):
         """
         torch.save({
             "state_dict": self.state_dict(),
-            "hyperparam": self.export_hyperparam(),
+            "hyperparam": self.export_hyperparams(),
         }, path)
 
-    @classmethod
+    @abc.abstractmethod
     def load(cls, path: str, **kwargs: Any) -> "Model":
         """
         Load model from a checkpoint.
-
-        :param path: Path to the checkpoint
-        :return: An instance of the model
+        Behaviour changes according to the type of model.
         """
-        checkpoint = torch.load(path, map_location=kwargs.get("map_location", "cpu"))
-        model = cls(**checkpoint["hyperparam"])
-        model.load_state_dict(checkpoint["state_dict"])
-        return model
+        pass

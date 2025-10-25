@@ -11,6 +11,11 @@ class StochasticController(Model):
 
     def __init__(self, z_dim, h_dim, action_dim, **_kwargs):
         super().__init__()
+
+        self.z_dim = z_dim
+        self.h_dim = h_dim
+        self.action_dim = action_dim
+
         self.fc_mean = torch.nn.Linear(z_dim + h_dim, action_dim)
         self.log_std = torch.nn.Parameter(torch.zeros(action_dim))  # learnable std
 
@@ -33,7 +38,15 @@ class StochasticController(Model):
 
         return action, log_prob
 
-    def export_hyperparam(self):
+    def export_hyperparams(self):
         return {
-            "class_name": self.__class__.__name__,
+            "z_dim": self.z_dim,
+            "h_dim": self.h_dim,
+            "action_dim": self.action_dim
         }
+
+    def save_state(self):
+        return self.state_dict()
+
+    def load(self, state_dict):
+        self.load_state_dict(state_dict)
