@@ -125,13 +125,19 @@ class VQ_VAE(Model):
         z_q, _, _ = self.vq(z_e)
         return z_q
 
-    def export_hyperparam(self):
+    def export_hyperparams(self):
         return {
-            "class_name": self.__class__.__name__,
             "input_shape": self.input_shape,
             "hidden_dim": self.hidden_dim,
+            "output_dim": self.output_dim,
             "num_embed": self.num_embed,
             "embed_dim": self.embed_dim,
             "kernel_size": self.kernel_size,
             "stride": self.stride
         }
+
+    def save_state(self):
+        return self.state_dict()
+
+    def load(self, state_dict):
+        self.load_state_dict(state_dict)

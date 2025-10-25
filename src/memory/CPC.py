@@ -8,6 +8,11 @@ class CPC(Model):
 
     def __init__(self, latent_dim, context_dim: int = 128, prediction_steps: int = 12):
         super().__init__()
+
+        self.latent_dim = latent_dim
+        self.context_dim = context_dim
+        self.prediction_steps = prediction_steps
+
         self.gru = torch.nn.GRU(latent_dim, context_dim, batch_first=True)
         self.predictors = torch.nn.ModuleList(
             [torch.nn.Linear(context_dim, latent_dim) for _ in range(prediction_steps)])
@@ -18,6 +23,18 @@ class CPC(Model):
         predictions = [W(context) for W in self.predictors]
         return predictions
 
+    def export_hyperparams(self):
+        return {
+            "latent_dim": self.latent_dim,
+            "context_dim": self.context_dim,
+            "prediction_steps": self.prediction_steps
+        }
+
+    def save_state(self):
+        return self.state_dict()
+
+    def load(self, state_dict):
+        self.load_state_dict(state_dict)
 
 def info_nce_loss(z_seq, predictions, k_steps=12):
     B, T, D = z_seq.shape

@@ -42,7 +42,6 @@ def step(model,
          cumulated_reward,
          iter_num: int = 0,
          tensorboard_writer=None,
-         reward_predictor_model: Model=None,
          loss_instance=None):
     if loss_instance is None:
         loss_instance = MSELoss()  # Same as below.
@@ -59,8 +58,8 @@ def step(model,
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
     last_reward = torch.tensor([cumulated_reward], dtype=torch.get_default_dtype())
-    output_dict = model(state_tensor, return_losses=True, action_space=action_space, reward_predictor_model=reward_predictor_model, last_reward=cumulated_reward)
-    total_loss = torch.sum(output_dict["total_loss"]) # - output_dict["log_probs"].mean() * reward
+    output_dict = model(state_tensor, return_losses=True, action_space=action_space, last_reward=cumulated_reward)
+    total_loss = torch.sum(output_dict["total_loss"])
 
 
     # Handle different action spaces
@@ -77,11 +76,12 @@ def step(model,
     else:
         cumulated_reward += step_reward
 
-    if reward_predictor_model:
+    if model.reward_predictor is not None:
         predicted_reward = output_dict["predicted_reward"]
         #print(cumulated_reward, predicted_reward.detach().item())
         total_loss = total_loss + loss_instance(predicted_reward.squeeze(0), cumulated_reward) / predicted_reward
 
+    total_loss = total_loss - output_dict["log_probs"].mean() * step_reward
     #total_loss = torch.abs(total_loss)
     total_loss.backward()
 
@@ -91,19 +91,15 @@ def step(model,
             #if iter_num and torch.isclose(torch.zeros_like(param.grad.norm()), param.grad.norm()): # Will ideally be removed in the future.
             #    print("{}'s gradient is low ! ({})".format(name, param.grad.norm().item()))
             tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
-        if reward_predictor_model:
-            for name, param in reward_predictor_model.named_parameters():
-                tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
 
     return cumulated_reward, total_loss.item(), new_state, done
 
 
-def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, reward_predictor_model: Model=None, loss_func: callable=MSELoss):
+def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss):
     # print(model.parameters)
-    parameters = list(model.parameters()) + list(reward_predictor_model.parameters()) if reward_predictor_model is not None else []
-    optimizer = torch.optim.AdamW(parameters, lr=learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_func = loss_func()  # Add potential args here.
     is_image_based = len(interface.env.observation_space.shape) == 3
     action_space = interface.env.action_space
@@ -111,11 +107,13 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
     writer = SummaryWriter() if use_tensorboard else None
 
     cumulated_reward = torch.tensor([0], dtype=torch.get_default_dtype())
-    for iter_num in range(max_iter):
+    iter_num = model.iter_num + 1
+    for experiment_index in range(model.nb_experiments + 1, model.nb_experiments + max_iter + 1):
         state, info = interface.reset()
         done = False
         total_episode_loss = 0
 
+        local_iter_num = 0
         while not done:
             cumulated_reward, loss, state, done = step(model,
                                        state,
@@ -127,10 +125,13 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
                                        cumulated_reward,
                                        iter_num=iter_num,
                                        tensorboard_writer=writer,
-                                       reward_predictor_model=reward_predictor_model,
                                        loss_instance=loss_func)
 
             total_episode_loss += loss
             if interface.env.render_mode == 'human':
                 interface.render()
-        print(f"Iteration {iter_num + 1}/{max_iter}, Mean Loss: {total_episode_loss/(iter_num + 1):.4f}")
+            iter_num += 1
+            local_iter_num += 1
+        print(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}/{max_iter}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
+    model.iter_num = iter_num
+    model.nb_experiments = experiment_index

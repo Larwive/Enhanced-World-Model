@@ -8,7 +8,7 @@ class Identity(Model):
     A dummy vision model that acts as an identity function for 1D vector-based environments.
     It mimics the output of a real vision model to be compatible with the WorldModel class.
     """
-    def __init__(self, input_shape, **kwargs):
+    def __init__(self, input_shape, **_kwargs):
         super().__init__()
         self.input_shape = input_shape
         # This is needed for the WorldModel's CPC logic and controller input
@@ -22,8 +22,13 @@ class Identity(Model):
         # The "encoded" version is just the input itself
         return input.unsqueeze(-1).unsqueeze(-1) # Add dummy H, W dims for flatten_vision_latents
 
-    def export_hyperparam(self):
+    def export_hyperparams(self):
         return {
-            "class_name": self.__class__.__name__,
             "input_shape": self.input_shape,
         }
+
+    def save_state(self):
+        return {}
+
+    def load(self, _state_dict):
+        pass
