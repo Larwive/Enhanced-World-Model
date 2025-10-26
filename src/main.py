@@ -53,7 +53,8 @@ def main():
     parser.add_argument('--save-path', default='./saved_models/')
     parser.add_argument('--load-path', default='')
     parser.add_argument('--gpu', default='0')
-    parser.add_argument('--render-mode', type=str, default='human')
+    parser.add_argument('--render-mode', type=str, default='rgb_array')
+    parser.add_argument('--render-every', type=int, default=50)
     args = parser.parse_args()
 
     if args.ui:
@@ -115,7 +116,7 @@ def main():
 
 
         # Start training
-        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
+        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, render_every=args.render_every)
 
         # Save the trained model
         world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
