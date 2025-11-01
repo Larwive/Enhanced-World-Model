@@ -101,7 +101,7 @@ def main():
         world_model = WorldModel(
             vision_model=vision_model,
             memory_model=TemporalTransformer,
-            controller_model=StochasticController,  #ModelPredictiveController,
+            controller_model=ModelPredictiveController,#StochasticController,  #ModelPredictiveController,
             input_shape=input_shape,
             vision_args=vision_args,
             memory_args=memory_args,
