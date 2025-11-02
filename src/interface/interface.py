@@ -1,5 +1,3 @@
-# src/interface/interface.py
-
 import gymnasium as gym
 
 class GymEnvInterface:
