@@ -11,7 +11,7 @@ class DensePredictorModel(Model):
         self.h_dim = h_dim
         self.action_dim = action_dim
 
-        input_dim = z_dim + h_dim + 2  # Need formal proof.
+        input_dim = z_dim + h_dim + action_dim + 1  # Need formal proof.
 
         self.net = nn.Sequential( # Hard coded for now.
             nn.Linear(input_dim, 128),

@@ -52,7 +52,6 @@ def main():
     parser.add_argument('--load-path', default='')
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--render-mode', type=str, default='rgb_array')
-    parser.add_argument('--render-every', type=int, default=50)
 
 
     # Pretraining args
@@ -92,7 +91,7 @@ def main():
             logger.info("Detected vector-based environment.")
             input_shape = obs_space.shape
             vision_model = Identity
-            vision_args = {}
+            vision_args = {"embed_dim": obs_space.shape[0]}
 
         # Configure memory and controller based on environment
         action_space = interface.env.action_space
@@ -101,7 +100,7 @@ def main():
         else:  # Box, etc.
             action_dim = action_space.shape[0]
 
-        memory_args = {"d_model": 128, "nhead": 8}
+        memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "nhead": 8}
         controller_args = {"action_dim": action_dim}
         logger.info(f"Vision model: {vision_model}")
         # Initialize the World Model
@@ -136,7 +135,7 @@ def main():
 
             pretrain(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path)
         else:
-            train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, render_every=args.render_every)
+            train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
             world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
 
             logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")

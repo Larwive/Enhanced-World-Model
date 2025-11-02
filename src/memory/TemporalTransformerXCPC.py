@@ -7,15 +7,14 @@ class TemporalTransformer(Model):
     def __init__(self, input_dim, latent_dim=4, d_model=128, nhead=8, num_layers=4):
         super().__init__()
         assert d_model % nhead == 0, "d_model must be divisible by nhead"
-        
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.d_model = d_model
+        self.nhead = nhead
+        self.num_layers = num_layers
         
-        # Projection entrée
         self.input_proj = torch.nn.Linear(input_dim, d_model)
         
-        # Transformer
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model=d_model, 
             nhead=nhead, 
@@ -23,11 +22,8 @@ class TemporalTransformer(Model):
         )
         self.transformer = torch.nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Projection sortie vers espace latent
         self.output_proj = torch.nn.Linear(d_model, latent_dim)
-        
-        # État caché initial (optionnel mais utile)
-        self.hidden_state = None
+
     
     def forward(self, z_current, action=None):
         """
@@ -38,7 +34,7 @@ class TemporalTransformer(Model):
             z_next_pred: (B, latent_dim, 1, 1) - prédiction du prochain état latent
             hidden: (B, d_model) - état caché pour usage futur
         """
-        # Optionnel : concaténer avec l'action si disponible
+
         if action is not None:
             x = torch.cat([z_current, action], dim=-1)
             if not hasattr(self, 'action_proj'):
@@ -50,18 +46,14 @@ class TemporalTransformer(Model):
             projected = self.action_proj(x)
         else:
             projected = self.input_proj(z_current)
-        
-        # Ajouter dimension de séquence
+    
         projected = projected.unsqueeze(1)  # (B, 1, d_model)
         
-        # Transformer
         memory = self.transformer(projected)  # (B, 1, d_model)
         hidden = memory.squeeze(1)  # (B, d_model)
         
-        # Prédire le prochain z
         z_next_pred = self.output_proj(hidden)  # (B, latent_dim)
         
-        # Reshape
         z_next_pred = z_next_pred.unsqueeze(-1).unsqueeze(-1)  # (B, latent_dim, 1, 1)
         
         return z_next_pred, hidden
@@ -69,6 +61,7 @@ class TemporalTransformer(Model):
     def export_hyperparams(self):
         return {
             "input_dim": self.input_dim,
+            "latent_dim": self.latent_dim,
             "d_model": self.d_model,
             "nhead": self.nhead,
             "num_layers": self.num_layers
