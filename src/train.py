@@ -6,10 +6,21 @@ import gymnasium as gym
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard.summary import hparams
 from torch.nn import MSELoss
+import logging
 
 from interface.interface import GymEnvInterface
 from WorldModel import WorldModel
 from Model import Model
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+    handlers=[
+        logging.FileHandler("train.log", mode='w'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class SummaryWriter(SummaryWriter):
     """
@@ -42,7 +53,9 @@ def step(model,
          cumulated_reward,
          iter_num: int = 0,
          tensorboard_writer=None,
-         loss_instance=None):
+         loss_instance=None,
+         memory_predicted=None):
+
     if loss_instance is None:
         loss_instance = MSELoss()  # Same as below.
     optimizer.zero_grad()
@@ -57,7 +70,6 @@ def step(model,
         # For vector data, just add batch dimension and move to device
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
-    last_reward = torch.tensor([cumulated_reward], dtype=torch.get_default_dtype())
     output_dict = model(state_tensor, return_losses=True, action_space=action_space, last_reward=cumulated_reward)
     total_loss = torch.sum(output_dict["total_loss"])
 
@@ -81,6 +93,10 @@ def step(model,
         #print(cumulated_reward, predicted_reward.detach().item())
         total_loss = total_loss + loss_instance(predicted_reward.squeeze(0), cumulated_reward) / predicted_reward
 
+    if memory_predicted is not None:
+       logger.info(f"{output_dict['vision_latent']}, {memory_predicted}")
+       total_loss = total_loss + torch.abs(output_dict["vision_latent"] - memory_predicted).mean()
+
     total_loss = total_loss - output_dict["log_probs"].mean() * step_reward
     #total_loss = torch.abs(total_loss)
     total_loss.backward()
@@ -90,14 +106,15 @@ def step(model,
         for name, param in model.named_parameters():
             #if iter_num and torch.isclose(torch.zeros_like(param.grad.norm()), param.grad.norm()): # Will ideally be removed in the future.
             #    print("{}'s gradient is low ! ({})".format(name, param.grad.norm().item()))
-            tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
+            if param.grad is not None:
+                tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
 
-    return cumulated_reward, total_loss.item(), new_state, done
+    return cumulated_reward, total_loss.item(), new_state, done, output_dict["memory_prediction"]
 
 
-def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss):
+def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, render_every: int = 50):
     # print(model.parameters)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_func = loss_func()  # Add potential args here.
@@ -112,10 +129,11 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
         state, info = interface.reset()
         done = False
         total_episode_loss = 0
+        memory_predicted = None
 
         local_iter_num = 0
         while not done:
-            cumulated_reward, loss, state, done = step(model,
+            cumulated_reward, loss, state, done, memory_predicted = step(model,
                                        state,
                                        interface,
                                        optimizer,
@@ -125,13 +143,16 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
                                        cumulated_reward,
                                        iter_num=iter_num,
                                        tensorboard_writer=writer,
-                                       loss_instance=loss_func)
+                                       loss_instance=loss_func, 
+                                       memory_predicted=memory_predicted)
 
             total_episode_loss += loss
-            if interface.env.render_mode == 'human':
+            if interface.env.render_mode is not None:
                 interface.render()
+
             iter_num += 1
             local_iter_num += 1
-        print(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}/{max_iter}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
+
+        # logger.info(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
     model.iter_num = iter_num
     model.nb_experiments = experiment_index

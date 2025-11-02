@@ -101,7 +101,7 @@ def launch_training(
             line = line.strip()
             if line:
                 output_log.append(line)
-                yield "\n".join(output_log[-50:])
+                yield "\n".join(output_log[-100:])
         process.stdout.close()
     
     return_code = process.wait()
