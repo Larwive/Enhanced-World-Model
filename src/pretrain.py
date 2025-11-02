@@ -31,6 +31,17 @@ class SummaryWriter(SummaryWriter):
             for k, v in metric_dict.items():
                 w_hp.add_scalar(k, v)
 
+def state_transform(state, is_image_based, device):
+    if is_image_based:
+        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
+        state_transposed = np.transpose(state, (2, 0, 1))
+        state_tensor = torch.from_numpy(state_transposed).float().unsqueeze(0).to(device)
+        # Normalize image data to [0, 1]
+        return state_tensor / 255.0
+    else:
+        # For vector data, just add batch dimension and move to device
+        return torch.from_numpy(state).float().unsqueeze(0).to(device)
+
 
 def step(model,
          state,
@@ -42,23 +53,16 @@ def step(model,
          iter_num: int = 0,
          tensorboard_writer=None,
          loss_instance=None,
-         previous_memory_prediction=None,
          mode:str="random",
-         delay:float=0.2):
+         delay:float=0.2,
+         pretrain_vision: bool=False,
+         pretrain_memory: bool=False):
 
     if loss_instance is None:
         loss_instance = MSELoss()  # Same as below.
     optimizer.zero_grad()
 
-    if is_image_based:
-        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
-        state_transposed = np.transpose(state, (2, 0, 1))
-        state_tensor = torch.from_numpy(state_transposed).float().unsqueeze(0).to(device)
-        # Normalize image data to [0, 1]
-        state_tensor = state_tensor / 255.0
-    else:
-        # For vector data, just add batch dimension and move to device
-        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
+    state_tensor = state_transform(state, is_image_based=is_image_based, device=device)
 
     output_dict = model(state_tensor, return_losses=True, action_space=action_space)
     total_loss = torch.sum(output_dict["total_loss"])
@@ -71,12 +75,16 @@ def step(model,
 
     new_state, _, done, info = interface.step(action)
     
-    total_loss.backward()
+    if pretrain_memory:
+       total_loss = total_loss + torch.abs(model.vision.encode(state_transform(new_state, is_image_based=is_image_based, device=device)).detach() - output_dict["memory_prediction"]).mean()
+
+    if pretrain_vision or (iter_num - 1): # Testing if only memory is being pretrained.
+        total_loss.backward()
 
     if tensorboard_writer is not None:
         tensorboard_writer.add_scalar("train/loss", total_loss.item(), iter_num)
         for name, param in model.named_parameters():
-            if param.requires_grad:
+            if param.requires_grad and param.grad is not None:
                 tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
@@ -84,7 +92,7 @@ def step(model,
     return total_loss.item(), new_state, done
 
 
-def pretrain(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, mode:str="random", delay:float=0.2, save_path="./"):
+def pretrain(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, mode:str="random", delay:float=0.2, save_path="./", save_prefix="", pretrain_vision: bool=False, pretrain_memory: bool=False):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_func = loss_func()  # Add potential args here.
     is_image_based = len(interface.env.observation_space.shape) == 3
@@ -114,7 +122,9 @@ def pretrain(model: WorldModel, interface: GymEnvInterface, max_iter=10000, devi
                                        tensorboard_writer=writer,
                                        loss_instance=loss_func,
                                        mode=mode,
-                                       delay=delay)
+                                       delay=delay,
+                                       pretrain_vision=pretrain_vision,
+                                       pretrain_memory=pretrain_memory)
 
             total_episode_loss += loss
             if interface.env.render_mode == 'human':
@@ -127,6 +137,6 @@ def pretrain(model: WorldModel, interface: GymEnvInterface, max_iter=10000, devi
             if loss < best_loss and model.iter_num > last_save + 5:
                 best_loss = loss
                 last_save = model.iter_num
-                model.save(f"{save_path}pretrained_V_{interface.env.spec.id}.pt", interface.env.observation_space, interface.env.action_space)
+                model.save(f"{save_path}pretrained_{save_prefix}_{interface.env.spec.id}.pt", interface.env.observation_space, interface.env.action_space)
         
         print(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
