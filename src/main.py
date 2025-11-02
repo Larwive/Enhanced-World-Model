@@ -58,6 +58,7 @@ def main():
     parser.add_argument('--manual-mode-delay', type=float, default=0.05, help='Delay between each step during manual training.')
     parser.add_argument('--pretrain-mode', type=str, default='random', choices=['manual', 'random'])
     parser.add_argument('--pretrain-vision', action='store_true')
+    parser.add_argument('--pretrain-memory', action='store_true')
 
 
     args = parser.parse_args()
@@ -73,7 +74,6 @@ def main():
     logger.info(f"Using device: {device}")
 
     try:
-        # Initialize the environment interface
         if args.pretrain_vision and args.pretrain_mode == "manual":
             args.render_mode = "human"
         interface = GymEnvInterface(args.env_name, render_mode=args.render_mode)
@@ -121,10 +121,14 @@ def main():
             world_model.load(args.load_path, obs_space=obs_space, action_space=action_space)
 
 
-        # Start training
-        if args.pretrain_vision:
-            for param in world_model.memory.parameters():
-                param.requires_grad = False
+        if args.pretrain_vision or args.pretrain_memory:
+            if not args.pretrain_vision:
+                for param in world_model.vision.parameters():
+                    param.requires_grad = False
+            
+            if not args.pretrain_memory:
+                for param in world_model.memory.parameters():
+                    param.requires_grad = False
 
             for param in world_model.controller.parameters():
                 param.requires_grad = False
@@ -133,7 +137,8 @@ def main():
                 for param in world_model.reward_predictor.parameters():
                     param.requires_grad = False
 
-            pretrain(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path)
+            save_prefix = "" + ("V" if args.pretrain_vision else "") + ("M" if args.pretrain_memory else "")
+            pretrain(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path, save_prefix=save_prefix, pretrain_vision=args.pretrain_vision, pretrain_memory=args.pretrain_memory)
         else:
             train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
             world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)

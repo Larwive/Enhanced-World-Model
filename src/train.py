@@ -41,6 +41,18 @@ class SummaryWriter(SummaryWriter):
                 w_hp.add_scalar(k, v)
 
 
+def state_transform(state, is_image_based, device):
+    if is_image_based:
+        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
+        state_transposed = np.transpose(state, (2, 0, 1))
+        state_tensor = torch.from_numpy(state_transposed).float().unsqueeze(0).to(device)
+        # Normalize image data to [0, 1]
+        return state_tensor / 255.0
+    else:
+        # For vector data, just add batch dimension and move to device
+        return torch.from_numpy(state).float().unsqueeze(0).to(device)
+
+
 def step(model,
          state,
          interface,
@@ -51,22 +63,13 @@ def step(model,
          cumulated_reward,
          iter_num: int = 0,
          tensorboard_writer=None,
-         loss_instance=None,
-         previous_memory_prediction=None):
+         loss_instance=None):
 
     if loss_instance is None:
         loss_instance = MSELoss()  # Same as below.
     optimizer.zero_grad()
 
-    if is_image_based:
-        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
-        state_transposed = np.transpose(state, (2, 0, 1))
-        state_tensor = torch.from_numpy(state_transposed).float().unsqueeze(0).to(device)
-        # Normalize image data to [0, 1]
-        state_tensor = state_tensor / 255.0
-    else:
-        # For vector data, just add batch dimension and move to device
-        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
+    state_tensor = state_transform(state, is_image_based=is_image_based, device=device)
 
     output_dict = model(state_tensor, return_losses=True, action_space=action_space, last_reward=cumulated_reward)
     total_loss = torch.sum(output_dict["total_loss"])
@@ -89,8 +92,7 @@ def step(model,
         predicted_reward = output_dict["predicted_reward"]
         total_loss = total_loss + loss_instance(predicted_reward.squeeze(0), cumulated_reward) / predicted_reward
 
-    if previous_memory_prediction is not None:
-       total_loss = total_loss + torch.abs(output_dict["vision_latent"] - previous_memory_prediction).mean()
+    total_loss = total_loss + torch.abs(model.vision.encode(state_transform(new_state, is_image_based=is_image_based, device=device)).detach() - output_dict["memory_prediction"]).mean()
 
     total_loss = total_loss - output_dict["log_probs"].mean() * step_reward
     total_loss.backward()
@@ -103,7 +105,7 @@ def step(model,
 
     optimizer.step()
 
-    return cumulated_reward, total_loss.item(), new_state, done, output_dict["memory_prediction"]
+    return cumulated_reward, total_loss.item(), new_state, done
 
 
 def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, save_path="./"):
@@ -123,11 +125,10 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
         state, info = interface.reset()
         done = False
         total_episode_loss = 0
-        previous_memory_prediction = None
 
         local_iter_num = 0
         while not done:
-            cumulated_reward, loss, state, done, previous_memory_prediction = step(model,
+            cumulated_reward, loss, state, done = step(model,
                                        state,
                                        interface,
                                        optimizer,
@@ -137,8 +138,7 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
                                        cumulated_reward,
                                        iter_num=model.iter_num,
                                        tensorboard_writer=writer,
-                                       loss_instance=loss_func, 
-                                       previous_memory_prediction=previous_memory_prediction)
+                                       loss_instance=loss_func)
 
             total_episode_loss += loss
             if interface.env.render_mode  == 'human':

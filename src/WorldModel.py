@@ -146,8 +146,7 @@ class WorldModel(Model):
         total_loss = recon_loss + vq_loss 
         
         outputs = {
-            "vision_latent": z_q,  # (B, latent_dim, H, W)
-            "memory_prediction": z_next_pred.detach().clone(),  # (B, latent_dim, 1, 1) - prédiction de z_{t+1}
+            "memory_prediction": z_next_pred,  # (B, latent_dim, 1, 1) - prédiction de z_{t+1}
             "memory_hidden": h_t,  # (B, d_model) - état caché du transformer
             "action": action,
             "recon_loss": recon_loss,
