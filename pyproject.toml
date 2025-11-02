@@ -1,5 +1,5 @@
 [project]
-name = "enhanced-world-model"
+name = "Enhanced-World-Model"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -16,3 +16,19 @@ dependencies = [
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/nightly/cu130"]
+
+[tool.uv.dependencies]
+macos = [
+    "torch>=2.9.0",
+    "torchvision>=0.22.1"
+]
+
+windows = [
+    "torch>=2.8.0+cu130",
+    "torchvision>=0.22.1"
+]
+
+linux = [
+    "torch>=2.8.0+cu130",
+    "torchvision>=0.22.1"
+]
