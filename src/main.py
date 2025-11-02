@@ -1,6 +1,3 @@
-# src/main.py
-
-
 import argparse
 import torch
 import numpy as np
@@ -16,6 +13,7 @@ from controller.ModelPredictiveController import ModelPredictiveController
 from controller.StochasticController import StochasticController
 from WorldModel import WorldModel
 from train import train
+from pretrain import pretrain
 from reward_predictor.LinearPredictor import LinearPredictorModel
 from reward_predictor.DensePredictor import DensePredictorModel
 
@@ -55,6 +53,14 @@ def main():
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--render-mode', type=str, default='rgb_array')
     parser.add_argument('--render-every', type=int, default=50)
+
+
+    # Pretraining args
+    parser.add_argument('--manual-mode-delay', type=float, default=0.05, help='Delay between each step during manual training.')
+    parser.add_argument('--pretrain-mode', type=str, default='random', choices=['manual', 'random'])
+    parser.add_argument('--pretrain-vision', action='store_true')
+
+
     args = parser.parse_args()
 
     if args.ui:
@@ -69,9 +75,10 @@ def main():
 
     try:
         # Initialize the environment interface
+        if args.pretrain_vision and args.pretrain_mode == "manual":
+            args.render_mode = "human"
         interface = GymEnvInterface(args.env_name, render_mode=args.render_mode)
         obs_space = interface.env.observation_space
-
         is_image_based = len(obs_space.shape) == 3
 
         if is_image_based:
@@ -116,12 +123,23 @@ def main():
 
 
         # Start training
-        train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, render_every=args.render_every)
+        if args.pretrain_vision:
+            for param in world_model.memory.parameters():
+                param.requires_grad = False
 
-        # Save the trained model
-        world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
+            for param in world_model.controller.parameters():
+                param.requires_grad = False
 
-        logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")
+            if world_model.reward_predictor is not None:
+                for param in world_model.reward_predictor.parameters():
+                    param.requires_grad = False
+
+            pretrain(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path)
+        else:
+            train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, render_every=args.render_every)
+            world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
+
+            logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")
 
         # Close the environment
         interface.close()
