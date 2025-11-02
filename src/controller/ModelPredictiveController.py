@@ -17,7 +17,7 @@ class ModelPredictiveController(Model):
     def forward(self, z_t, h_t):
         # z_t: (B, z_dim) and h_t: (B, h_dim)
         x = torch.cat([z_t, h_t], dim=-1)
-        return self.fc(x)  # (B, action_dim)
+        return self.fc(x), self.fc(x)  # (B, action_dim)
 
     def export_hyperparams(self):
         return {

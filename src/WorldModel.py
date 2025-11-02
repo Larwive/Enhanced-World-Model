@@ -106,33 +106,57 @@ class WorldModel(Model):
 
         self.reward_predictor = None
 
-    def forward(self, input, action_space, use_cpc: bool = False, return_losses: bool = False, last_reward=None):
+    def forward(self, input, action_space, use_cpc: bool = True, 
+                return_losses: bool = False, last_reward=None): 
+        """
+        Args:
+            input: observation actuelle
+            action_space: espace d'actions
+            use_cpc: utiliser CPC loss
+            return_losses: retourner les losses
+            last_reward: dernière récompense
+            z_next_actual: (B, latent_dim, 1, 1) - vrai prochain z pour training
+        """
+        # === VISION MODEL ===
         recon, vq_loss = self.vision(input)
-        z_q = self.vision.encode(input)
-
-        # For image-based models, z_q is (B, D, H, W). We need a vector for the memory model.
-        # For vector-based models (Identity), z_q is (B, D, 1, 1).
-        z_t = z_q.mean(dim=(2, 3))  # This works for both cases
-
-        h_t = self.memory(z_t.detach().clone())
-
-        action, log_probs = self.controller(z_t.detach().clone(), h_t)
-
+        z_q = self.vision.encode(input)  # (B, latent_dim, H, W)
+        
+        # Flatten spatial dimensions pour obtenir le vecteur latent
+        z_t = z_q.mean(dim=(2, 3))  # (B, latent_dim)
+        
+        # === MEMORY MODEL ===
+        # Prédire le prochain état latent z_{t+1} et obtenir l'état caché
+        z_next_pred, h_t = self.memory(z_t.detach().clone())
+        # z_next_pred: (B, latent_dim, 1, 1)
+        # h_t: (B, d_model=128)
+        
+        # === CONTROLLER ===
+        # Concaténer z_t et h_t pour donner au controller
+        action, log_probs = self.controller(z_t.detach().clone(), h_t.detach().clone())
         action = squash_to_action_space(action, action_space)
-
+        
         if not return_losses:
             return action
-
+        
+        # === LOSSES ===
+        # Vision reconstruction loss
         recon_loss = torch.nn.functional.mse_loss(recon, input)
-        total_loss = recon_loss + vq_loss
+        
+        # Memory prediction loss (si z_next_actual est fourni)
+        total_loss = recon_loss + vq_loss 
+        
         outputs = {
+            "vision_latent": z_q,  # (B, latent_dim, H, W)
+            "memory_prediction": z_next_pred.detach().clone(),  # (B, latent_dim, 1, 1) - prédiction de z_{t+1}
+            "memory_hidden": h_t,  # (B, d_model) - état caché du transformer
             "action": action,
             "recon_loss": recon_loss,
             "vq_loss": vq_loss,
             "total_loss": total_loss,
             "log_probs": log_probs
         }
-
+        
+        # === CPC (optionnel) ===
         if use_cpc and self.cpc is not None:
             z_seq = flatten_vision_latents(z_q)
             preds = self.cpc(z_seq)
@@ -140,10 +164,16 @@ class WorldModel(Model):
             total_loss = total_loss + cpc_loss
             outputs["cpc_loss"] = cpc_loss
             outputs["total_loss"] = total_loss
-
+        
+        # === REWARD PREDICTOR ===
         if self.reward_predictor and last_reward is not None:
-            # Need to detach and clone h_t ?
-            outputs["predicted_reward"] = self.reward_predictor(z_t.detach().clone(), h_t, log_probs, last_reward)
+            outputs["predicted_reward"] = self.reward_predictor(
+                z_t.detach().clone(), 
+                h_t, 
+                log_probs, 
+                last_reward
+            )
+        
         return outputs
 
     def export_hyperparams(self):
