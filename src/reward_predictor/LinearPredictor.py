@@ -15,7 +15,7 @@ class LinearPredictorModel(Model):
         self.h_dim = h_dim
         self.action_dim = action_dim
 
-        self.linear = torch.nn.Linear(z_dim + h_dim + 2, 1) # Suspicious dim calculation. Need proper proof.
+        self.linear = torch.nn.Linear(z_dim + h_dim + action_dim + 1, 1) # Suspicious dim calculation. Need proper proof.
 
     def forward(self, z_t, h_t, log_prob, last_reward):
         x = torch.cat([z_t, h_t, log_prob.unsqueeze(-1), torch.tensor([[last_reward]])], dim=-1)  # Potential incorrect cat

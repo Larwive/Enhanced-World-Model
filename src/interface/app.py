@@ -24,8 +24,7 @@ def launch_training(
     dropout,
     render_mode,
     save_path,
-    load_path_files,
-    render_every
+    load_path_files
 ):
     """
     Launches the training script as a subprocess and streams its stdout/stderr
@@ -61,8 +60,6 @@ def launch_training(
         str(dropout),
         "--render-mode",
         "human" if render_mode else "rgb_array",
-        "--render-every",
-        str(render_every),
         "--save-path",
         save_path,
         "--load-path",
@@ -170,7 +167,6 @@ with gr.Blocks(theme=gr.themes.Default(primary_hue="blue", secondary_hue="blue")
             random_seed = gr.Number(label="Random Seed", value=42, precision=0)
             max_epoch = gr.Number(label="Max Epochs", value=200, precision=0)
             patience = gr.Number(label="Patience", value=5, precision=0)
-            render_every = gr.Number(label="Display Each", value=5, precision=0)
             batch_size = gr.Number(label="Batch Size", value=64, precision=0)
             learning_rate = gr.Number(label="Learning Rate", value=1e-3)
             dropout = gr.Slider(0, 1, label="Dropout", value=0.05, step=0.05)
@@ -224,8 +220,7 @@ with gr.Blocks(theme=gr.themes.Default(primary_hue="blue", secondary_hue="blue")
             dropout,
             render_mode,
             save_path,
-            load_path_explorer,
-            render_every
+            load_path_explorer
         ],
         outputs=output,
     )
