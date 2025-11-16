@@ -5,7 +5,6 @@ import gymnasium as gym
 import logging
 
 
-from interface.interface import GymEnvInterface
 from vision.VQ_VAE import VQ_VAE
 from vision.Identity import Identity
 from memory.TemporalTransformerXCPC import TemporalTransformer
@@ -76,8 +75,8 @@ def main():
     try:
         if args.pretrain_vision and args.pretrain_mode == "manual":
             args.render_mode = "human"
-        interface = GymEnvInterface(args.env_name, render_mode=args.render_mode)
-        obs_space = interface.env.observation_space
+        env = gym.make(args.env_name, render_mode=args.render_mode)
+        obs_space = env.observation_space
         is_image_based = len(obs_space.shape) == 3
 
         if is_image_based:
@@ -94,7 +93,7 @@ def main():
             vision_args = {"embed_dim": obs_space.shape[0]}
 
         # Configure memory and controller based on environment
-        action_space = interface.env.action_space
+        action_space = env.action_space
         if isinstance(action_space, gym.spaces.Discrete):
             action_dim = 1  # action_space.n is actually the number of possible values
         else:  # Box, etc.
@@ -138,15 +137,15 @@ def main():
                     param.requires_grad = False
 
             save_prefix = "" + ("V" if args.pretrain_vision else "") + ("M" if args.pretrain_memory else "")
-            pretrain(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path, save_prefix=save_prefix, pretrain_vision=args.pretrain_vision, pretrain_memory=args.pretrain_memory)
+            pretrain(world_model, env, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path, save_prefix=save_prefix, pretrain_vision=args.pretrain_vision, pretrain_memory=args.pretrain_memory)
         else:
-            train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
+            train(world_model, env, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
             world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
 
             logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")
 
         # Close the environment
-        interface.close()
+        env.close()
         logger.info("Environment closed.")
     except Exception as e:
         logger.exception(f"Exception during training: {e}")
