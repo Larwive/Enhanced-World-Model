@@ -6,7 +6,6 @@ from torch.utils.tensorboard.summary import hparams
 from torch.nn import MSELoss
 import logging
 
-from interface.interface import GymEnvInterface
 from WorldModel import WorldModel
 from Model import Model
 
@@ -55,7 +54,7 @@ def state_transform(state, is_image_based, device):
 
 def step(model,
          state,
-         interface,
+         env,
          optimizer,
          device,
          is_image_based,
@@ -81,7 +80,8 @@ def step(model,
     else:  # Continuous action space
         action_np = output_dict["action"].squeeze(0).cpu().detach().numpy()
 
-    new_state, step_reward, done, info = interface.step(action_np)
+    new_state, step_reward, terminated, truncated, info = env.step(action_np)
+    done = terminated or truncated
 
     if done:
         cumulated_reward = torch.tensor([step_reward], dtype=torch.get_default_dtype())
@@ -108,11 +108,11 @@ def step(model,
     return cumulated_reward, total_loss.item(), new_state, done
 
 
-def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, save_path="./"):
+def train(model: WorldModel, env, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, save_path="./"):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_func = loss_func()  # Add potential args here.
-    is_image_based = len(interface.env.observation_space.shape) == 3
-    action_space = interface.env.action_space
+    is_image_based = len(env.observation_space.shape) == 3
+    action_space = env.action_space
 
     writer = SummaryWriter() if use_tensorboard else None
 
@@ -122,7 +122,7 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
     best_loss = torch.inf
     last_save = model.iter_num
     for experiment_index in range(model.nb_experiments + 1, model.nb_experiments + max_iter + 1):
-        state, info = interface.reset()
+        state, info = env.reset()
         done = False
         total_episode_loss = 0
 
@@ -130,7 +130,7 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
         while not done:
             cumulated_reward, loss, state, done = step(model,
                                        state,
-                                       interface,
+                                       env,
                                        optimizer,
                                        device,
                                        is_image_based,
@@ -141,8 +141,8 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
                                        loss_instance=loss_func)
 
             total_episode_loss += loss
-            if interface.env.render_mode  == 'human':
-                interface.render()
+            if env.render_mode  == 'human':
+                env.render()
 
             model.iter_num += 1
             model.nb_experiments += 1
@@ -151,6 +151,6 @@ def train(model: WorldModel, interface: GymEnvInterface, max_iter=10000, device=
             if loss < best_loss and model.iter_num > last_save + 5:
                 best_loss = loss
                 last_save = model.iter_num
-                model.save(f"{save_path}{interface.env.spec.id}.pt", interface.env.observation_space, interface.env.action_space)
+                model.save(f"{save_path}{env.spec.id}.pt", env.observation_space, env.action_space)
 
         # logger.info(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
