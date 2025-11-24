@@ -7,8 +7,9 @@ import logging
 
 from vision.VQ_VAE import VQ_VAE
 from vision.Identity import Identity
-from memory.TemporalTransformerXCPC import TemporalTransformer
-from controller.ModelPredictiveController import ModelPredictiveController
+from memory.TemporalTransformer import TemporalTransformer
+from controller.DiscreteModelPredictiveController import DiscreteModelPredictiveController
+from controller.ContinuousModelPredictiveController import ContinuousModelPredictiveController
 from controller.StochasticController import StochasticController
 from WorldModel import WorldModel
 from train import train
@@ -96,27 +97,29 @@ def main():
         action_space = env.action_space
         if isinstance(action_space, gym.spaces.Discrete):
             action_dim = 1  # action_space.n is actually the number of possible values
+            controller_model = DiscreteModelPredictiveController
         else:  # Box, etc.
             action_dim = action_space.shape[0]
+            controller_model = ContinuousModelPredictiveController
 
-        memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "nhead": 8}
+        memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "action_dim": action_dim, "nhead": 8}
         controller_args = {"action_dim": action_dim}
         logger.info(f"Vision model: {vision_model}")
         # Initialize the World Model
         world_model = WorldModel(
             vision_model=vision_model,
             memory_model=TemporalTransformer,
-            controller_model=ModelPredictiveController,#StochasticController,  #ModelPredictiveController,
+            controller_model=controller_model,#StochasticController,  #ModelPredictiveController,
             input_shape=input_shape,
             vision_args=vision_args,
             memory_args=memory_args,
             controller_args=controller_args,
         ).to(device)
 
-        world_model.set_reward_predictor(DensePredictorModel)
+        world_model.set_reward_predictor(LinearPredictorModel)
 
         if args.load_path:
-            print("Loading model...")
+            print(f"Loading model from {args.load_path}")
             world_model.load(args.load_path, obs_space=obs_space, action_space=action_space)
 
 

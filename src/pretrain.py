@@ -10,7 +10,7 @@ from WorldModel import WorldModel
 from Model import Model
 from manual_control import register_input
 
-class SummaryWriter(SummaryWriter):
+class HyperSummaryWriter(SummaryWriter):
     """
     Add possiblity to store hyperparameters.
     """
@@ -98,7 +98,7 @@ def pretrain(model: WorldModel, env, max_iter=10000, device:torch.device=torch.d
     is_image_based = len(env.observation_space.shape) == 3
     action_space = env.action_space
 
-    writer = SummaryWriter() if use_tensorboard else None
+    writer = HyperSummaryWriter() if use_tensorboard else None
 
     model.iter_num += 1
 

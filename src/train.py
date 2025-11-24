@@ -19,7 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class SummaryWriter(SummaryWriter):
+class HyperSummaryWriter(SummaryWriter):
     """
     Add possiblity to store hyperparameters.
     """
@@ -114,7 +114,7 @@ def train(model: WorldModel, env, max_iter=10000, device='cpu', use_tensorboard:
     is_image_based = len(env.observation_space.shape) == 3
     action_space = env.action_space
 
-    writer = SummaryWriter() if use_tensorboard else None
+    writer = HyperSummaryWriter() if use_tensorboard else None
 
     cumulated_reward = torch.tensor([0], dtype=torch.get_default_dtype())
     model.iter_num += 1

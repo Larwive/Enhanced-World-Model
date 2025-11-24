@@ -1,2 +1,2 @@
-from .TemporalTransformerXCPC import TemporalTransformer
+from .TemporalTransformer import TemporalTransformer
 from .CPC import CPC
