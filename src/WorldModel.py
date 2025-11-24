@@ -2,7 +2,6 @@ import torch
 import gymnasium as gym
 
 from Model import Model
-from memory.CPC import info_nce_loss
 from memory.MemoryModel import flatten_vision_latents
 
 import vision
@@ -78,9 +77,7 @@ class WorldModel(Model):
                  input_shape,
                  vision_args,
                  memory_args,
-                 controller_args,
-                 cpc_model: Model | None = None,
-                 cpc_args: dict | None = None) -> None:
+                 controller_args) -> None:
         super().__init__()
         self.iter_num = 0  # The number of training iterations tied to this model.
         self.nb_experiments = 0
@@ -97,22 +94,14 @@ class WorldModel(Model):
         controller_h_dim = self.memory_d_model
         self.controller = controller_model(z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args)
 
-        if cpc_args is None:
-            cpc_args = {"context_dim": 128, "prediction_steps": 12}
-        if cpc_model is not None:
-            self.cpc = cpc_model(self.vision.embed_dim, **cpc_args)
-        else:
-            self.cpc = None
-
         self.reward_predictor = None
+        self.a_prev = None
 
-    def forward(self, input, action_space, use_cpc: bool = True, 
-                return_losses: bool = False, last_reward=None): 
+    def forward(self, input, action_space, is_image_based: bool, return_losses: bool = False, last_reward=None): 
         """
         Args:
             input: observation actuelle
             action_space: espace d'actions
-            use_cpc: utiliser CPC loss
             return_losses: retourner les losses
             last_reward: dernière récompense
             z_next_actual: (B, latent_dim, 1, 1) - vrai prochain z pour training
@@ -126,9 +115,17 @@ class WorldModel(Model):
         
         # === MEMORY MODEL ===
         # Prédire le prochain état latent z_{t+1} et obtenir l'état caché
-        z_next_pred, h_t = self.memory(z_t.detach().clone())
+        # z_next_pred, h_t = self.memory(z_t)
         # z_next_pred: (B, latent_dim, 1, 1)
         # h_t: (B, d_model=128)
+        if self.a_prev is None:
+            sample_shape = np.shape(action_space.sample())
+            if sample_shape == ():
+                sample_shape = (self.action_dim,)
+            self.a_prev = torch.zeros((input.shape[0], *sample_shape), device=input.device, dtype=torch.float32)
+        
+        h_t = self.memory.update_memory(z_t, self.a_prev)
+
         
         # === CONTROLLER ===
         # Concaténer z_t et h_t pour donner au controller
@@ -146,7 +143,7 @@ class WorldModel(Model):
         total_loss = recon_loss + vq_loss 
         
         outputs = {
-            "memory_prediction": z_next_pred,  # (B, latent_dim, 1, 1) - prédiction de z_{t+1}
+            "memory_prediction": z_next_pred,  # (B, latent_dim) - prédiction de z_{t+1}
             "memory_hidden": h_t,  # (B, d_model) - état caché du transformer
             "action": action,
             "recon_loss": recon_loss,
@@ -154,15 +151,6 @@ class WorldModel(Model):
             "total_loss": total_loss,
             "log_probs": log_probs
         }
-        
-        # === CPC (optionnel) ===
-        if use_cpc and self.cpc is not None:
-            z_seq = flatten_vision_latents(z_q)
-            preds = self.cpc(z_seq)
-            cpc_loss = info_nce_loss(z_seq, preds)
-            total_loss = total_loss + cpc_loss
-            outputs["cpc_loss"] = cpc_loss
-            outputs["total_loss"] = total_loss
         
         # === REWARD PREDICTOR ===
         if self.reward_predictor and last_reward is not None:
@@ -174,6 +162,11 @@ class WorldModel(Model):
             )
         
         return outputs
+    
+    def reset_env_memory(self, env_idx):
+        self.memory.reset_env_memory(env_idx)
+        if self.a_prev is not None:
+            self.a_prev[env_idx] = 0
 
     def export_hyperparams(self):
         pass
@@ -198,11 +191,6 @@ class WorldModel(Model):
                    "controller_dict": self.controller.save_state(),
                   }
 
-        if self.cpc is not None:
-            saving_dict["cpc_model"] = self.cpc.__class__.__name__
-            saving_dict["cpc_args"] = self.cpc.export_hyperparams()
-            saving_dict["cpc_dict"] = self.cpc.save_state()
-
         if self.reward_predictor is not None:
             saving_dict["reward_predictor_model"] = self.reward_predictor.__class__.__name__
             saving_dict["reward_predictor_args"] = self.reward_predictor.export_hyperparams()
@@ -226,9 +214,6 @@ class WorldModel(Model):
         self.controller = getattr(controller, saved_dict["controller_model"])(**saved_dict["controller_args"])
         self.controller.load(saved_dict["controller_dict"])
 
-        if "CPC_dict" in saved_dict:
-            self.cpc = getattr(memory, saved_dict["cpc_model"])(**saved_dict["cpc_args"])
-            self.cpc.load(saved_dict["cpc_dict"])
         if "reward_predictor_dict" in saved_dict:
             self.reward_predictor = getattr(reward_predictor, saved_dict["reward_predictor_model"])(**saved_dict["reward_predictor_args"])
             self.reward_predictor.load(saved_dict["reward_predictor_dict"])

@@ -1,2 +1,2 @@
-from .ModelPredictiveController import ModelPredictiveController
+from .DiscreteModelPredictiveController import DiscreteModelPredictiveController
 from .StochasticController import StochasticController
