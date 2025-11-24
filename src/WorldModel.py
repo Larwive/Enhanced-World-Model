@@ -1,5 +1,6 @@
 import torch
 import gymnasium as gym
+import numpy as np
 
 from Model import Model
 from memory.MemoryModel import flatten_vision_latents
@@ -64,8 +65,8 @@ def squash_to_action_space(raw_action, action_space):
     decrypted_action_space = describe_action_space(action_space)
     low = torch.as_tensor(decrypted_action_space["low"], dtype=torch.float32, device=raw_action.device)
     high = torch.as_tensor(decrypted_action_space["high"], dtype=torch.float32, device=raw_action.device)
-    scaled = torch.sigmoid(raw_action) * (high - low) + low
-    return scaled.squeeze()
+    scaled = 0.5 * ((torch.tanh(raw_action) + 1) * (high - low)) + low
+    return scaled
 
 
 class WorldModel(Model):
@@ -84,8 +85,7 @@ class WorldModel(Model):
         self.vision = vision_model(input_shape, **vision_args)
 
         # The input to the memory model is the output of the vision model
-        memory_input_dim = self.vision.embed_dim
-        self.memory = memory_model(input_dim=memory_input_dim, **memory_args)
+        self.memory = memory_model(**memory_args)
 
         # The controller takes the output of both the vision and memory models
         # Note: self.memory.transformer.d_model might be a more robust way to get h_dim
@@ -108,10 +108,13 @@ class WorldModel(Model):
         """
         # === VISION MODEL ===
         recon, vq_loss = self.vision(input)
-        z_q = self.vision.encode(input)  # (B, latent_dim, H, W)
+        z_e = self.vision.encode(input, is_image_based=is_image_based)  # (B, latent_dim, H, W)
         
         # Flatten spatial dimensions pour obtenir le vecteur latent
-        z_t = z_q.mean(dim=(2, 3))  # (B, latent_dim)
+        if is_image_based:
+            z_t = z_e.mean(dim=(2, 3))  # (B, latent_dim)
+        else:
+            z_t = z_e
         
         # === MEMORY MODEL ===
         # Prédire le prochain état latent z_{t+1} et obtenir l'état caché
@@ -128,19 +131,32 @@ class WorldModel(Model):
 
         
         # === CONTROLLER ===
-        # Concaténer z_t et h_t pour donner au controller
-        action, log_probs = self.controller(z_t.detach().clone(), h_t.detach().clone())
-        action = squash_to_action_space(action, action_space)
+        action, log_probs, value, _entropy = self.controller(z_t, h_t)
+        if isinstance(action_space, gym.spaces.Discrete):
+            n = action_space.n
+
+            device = input.device
+            action = action.to(device)
+            log_probs = log_probs.to(device)
+
+            a_prev_onehot = torch.nn.functional.one_hot(action.long(), num_classes=n).float().to(device)
+            self.a_prev = a_prev_onehot.detach()
+
+            z_next_pred = self.memory.predict_next(z_t, self.a_prev, h_t)
+        else:
+            action = squash_to_action_space(action, action_space)
+            self.a_prev = action.detach()
+            z_next_pred = self.memory.predict_next(z_t, action, h_t)
         
         if not return_losses:
             return action
         
         # === LOSSES ===
         # Vision reconstruction loss
-        recon_loss = torch.nn.functional.mse_loss(recon, input)
+        recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(dim=tuple(range(1, recon.dim()))) 
         
         # Memory prediction loss (si z_next_actual est fourni)
-        total_loss = recon_loss + vq_loss 
+        total_loss = recon_loss.mean() + vq_loss.mean()
         
         outputs = {
             "memory_prediction": z_next_pred,  # (B, latent_dim) - prédiction de z_{t+1}
@@ -149,15 +165,15 @@ class WorldModel(Model):
             "recon_loss": recon_loss,
             "vq_loss": vq_loss,
             "total_loss": total_loss,
-            "log_probs": log_probs
+            "log_probs": log_probs,
+            "value": value
         }
         
         # === REWARD PREDICTOR ===
         if self.reward_predictor and last_reward is not None:
             outputs["predicted_reward"] = self.reward_predictor(
-                z_t.detach().clone(), 
+                z_t, #.detach().clone(), 
                 h_t, 
-                log_probs, 
                 last_reward
             )
         
@@ -221,3 +237,8 @@ class WorldModel(Model):
     def set_reward_predictor(self, reward_predictor_class: Model, **kwargs):
         self.reward_predictor = reward_predictor_class(z_dim=self.vision.embed_dim, h_dim=self.memory_d_model, action_dim=self.action_dim, **kwargs)
 
+def render_first_env(envs, title=""):
+    import cv2
+    frames = envs.render()
+    cv2.imshow(title + envs.spec.id, frames[0][..., ::-1])  # RGB -> BGR for OpenCV
+    cv2.waitKey(1)

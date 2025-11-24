@@ -120,7 +120,7 @@ class VQ_VAE(Model):
         x_recon = self.decoder(z_q)
         return x_recon, vq_loss
 
-    def encode(self, input):
+    def encode(self, input, is_image_based:bool):
         z_e = self.encoder(input)
         z_q, _, _ = self.vq(z_e)
         return z_q

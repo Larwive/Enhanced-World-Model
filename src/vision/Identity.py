@@ -1,5 +1,3 @@
-# src/vision/Identity.py
-
 import torch
 from Model import Model
 
@@ -11,16 +9,16 @@ class Identity(Model):
     def __init__(self, input_shape, **_kwargs):
         super().__init__()
         self.input_shape = input_shape
-        # This is needed for the WorldModel's CPC logic and controller input
         self.embed_dim = input_shape[0]
 
     def forward(self, input):
         # Return the input as the "reconstruction" and a zero loss
         return input, torch.tensor(0.0, device=input.device)
 
-    def encode(self, input):
-        # The "encoded" version is just the input itself
-        return input.unsqueeze(-1).unsqueeze(-1) # Add dummy H, W dims for flatten_vision_latents
+    def encode(self, input, is_image_based: bool):
+        if is_image_based:
+            return input.unsqueeze(-1).unsqueeze(-1) # Add dummy H, W dims for flatten_vision_latents
+        return input
 
     def export_hyperparams(self):
         return {
