@@ -97,7 +97,7 @@ class WorldModel(Model):
         self.reward_predictor = None
         self.a_prev = None
 
-    def forward(self, input, action_space, is_image_based: bool, return_losses: bool = False, last_reward=None): 
+    def forward(self, input, action_space, is_image_based: bool, return_losses: bool = False, last_reward=None):
         """
         Args:
             input: observation actuelle
@@ -109,24 +109,35 @@ class WorldModel(Model):
         # === VISION MODEL ===
         recon, vq_loss = self.vision(input)
         z_e = self.vision.encode(input, is_image_based=is_image_based)  # (B, latent_dim, H, W)
-        
+
         # Flatten spatial dimensions pour obtenir le vecteur latent
         if is_image_based:
             z_t = z_e.mean(dim=(2, 3))  # (B, latent_dim)
         else:
             z_t = z_e
-        
+
         # === MEMORY MODEL ===
-        # Prédire le prochain état latent z_{t+1} et obtenir l'état caché
-        # z_next_pred, h_t = self.memory(z_t)
-        # z_next_pred: (B, latent_dim, 1, 1)
-        # h_t: (B, d_model=128)
+        # Initialize a_prev with correct dimensions for the action representation
         if self.a_prev is None:
-            sample_shape = np.shape(action_space.sample())
-            if sample_shape == ():
-                sample_shape = (self.action_dim,)
-            self.a_prev = torch.zeros((input.shape[0], *sample_shape), device=input.device, dtype=torch.float32)
+            batch_size = input.shape[0]
+            if isinstance(action_space, gym.spaces.Discrete):
+                # For discrete actions, use one-hot encoding size
+                self.a_prev = torch.zeros((batch_size, action_space.n), device=input.device, dtype=torch.float32)
+            else:
+                # For continuous actions, use action space shape
+                action_shape = action_space.shape
+                self.a_prev = torch.zeros((batch_size, *action_shape), device=input.device, dtype=torch.float32)
         
+        # Validate dimensions match
+        expected_action_dim = self.a_prev.shape[-1]
+        if self.memory.action_dim != expected_action_dim:
+            raise ValueError(
+                f"Memory model action_dim mismatch: "
+                f"memory expects {self.memory.action_dim} but got {expected_action_dim}. "
+                f"This usually happens when the memory model was initialized with incorrect action_dim. "
+                f"For Discrete({action_space.n}), action_dim should be {action_space.n} (one-hot size)."
+            )
+
         h_t = self.memory.update_memory(z_t, self.a_prev)
 
 
