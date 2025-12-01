@@ -121,7 +121,8 @@ def main():
         # Configure memory and controller based on environment
         action_space = envs.single_action_space
         if isinstance(action_space, gym.spaces.Discrete):
-            action_dim = action_space.n  # action_space.n is actually the number of possible values
+            # For discrete actions: action_dim = number of possible actions (for one-hot encoding)
+            action_dim = action_space.n
             if args.use_improved_controller:
                 controller_model = ImprovedDiscreteController
                 controller_args = {
@@ -133,6 +134,7 @@ def main():
                 controller_model = DiscreteModelPredictiveController
                 controller_args = {"action_dim": action_dim}
         else:  # Box, etc.
+            # For continuous actions: action_dim = dimensionality of action vector
             action_dim = action_space.shape[0]
             if args.use_improved_controller:
                 controller_model = ImprovedContinuousController
@@ -145,6 +147,9 @@ def main():
                 controller_model = ContinuousModelPredictiveController
                 controller_args = {"action_dim": action_dim}
 
+        # IMPORTANT: action_dim must match the size of action tensors passed to memory:
+        # - Discrete: action_dim = action_space.n (one-hot vector size)
+        # - Continuous: action_dim = action_space.shape[0] (action vector size)
         memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "action_dim": action_dim, "nhead": 8}
         logger.info(f"Vision model: {vision_model}")
         # Initialize the World Model
