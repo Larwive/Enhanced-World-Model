@@ -1,23 +1,15 @@
+# src/train.py
+
 import torch
 import numpy as np
+import gymnasium as gym
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard.summary import hparams
-from torch.nn import MSELoss
-import logging
 
-from WorldModel import WorldModel, render_first_env
+from WorldModel import WorldModel
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[
-        logging.FileHandler("train.log", mode='w'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
-class HyperSummaryWriter(SummaryWriter):
+class SummaryWriter(SummaryWriter):
     """
     Add possiblity to store hyperparameters.
     """
@@ -38,189 +30,91 @@ class HyperSummaryWriter(SummaryWriter):
                 w_hp.add_scalar(k, v)
 
 
-def state_transform(state, is_image_based, device):
-    if is_image_based:
-        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
-        if state.ndim == 3:
-            state = state[None]
-        state_transposed = np.transpose(state, (0, 3, 1, 2))
-        state_tensor = torch.from_numpy(state_transposed).float().to(device)
-        # Normalize image data to [0, 1]
-        return state_tensor / 255.0
-    else:
-        if state.ndim == 1:
-            state = state[None]
-        return torch.from_numpy(state).float().to(device)
-
 def step(model,
          state,
-         envs,
          optimizer,
-         policy_optimizer,
          device,
          is_image_based,
          action_space,
-         cumulated_reward,
-         discounted_return,
-         gamma,
+         reward,
          iter_num: int = 0,
-         tensorboard_writer=None,
-         loss_instance=None):
-
-    if loss_instance is None:
-        loss_instance = MSELoss()  # Same as below.
-
-    state_tensor = state_transform(state, is_image_based=is_image_based, device=device)
-
-    output_dict = model(state_tensor, action_space=action_space, is_image_based=is_image_based, return_losses=True, last_reward=cumulated_reward)
-    total_loss = output_dict["total_loss"]
-
-    actions = output_dict["action"].cpu().detach().numpy()
-
-    new_state, step_reward, terminated, truncated, info = envs.step(actions)
-    dones = torch.from_numpy(terminated | truncated).to(device, dtype=torch.bool)
-
-    step_reward_t = torch.tensor(step_reward, dtype=torch.float32, device=device)
-
-    cumulated_reward += step_reward_t
-    #cumulated_reward[dones] = step_reward_t[dones]
-    #cumulated_reward[~dones] += step_reward_t[~dones]
-
-    if model.reward_predictor is not None:
-        predicted_reward = output_dict["predicted_reward"].squeeze(-1)
-        reward_prediction_loss = loss_instance(predicted_reward, step_reward_t).mean()
-        total_loss = total_loss + reward_prediction_loss
-
-    vision_encoded = model.vision.encode(state_transform(new_state, is_image_based=is_image_based, device=device), is_image_based=is_image_based)
-
+         tensorboard_writer=None):
+    optimizer.zero_grad()
     if is_image_based:
-        vision_encoded = vision_encoded.mean(dim=(2, 3))
-
-    memory_loss = torch.nn.functional.mse_loss(vision_encoded, output_dict["memory_prediction"])
-    total_loss = total_loss + memory_loss
-    # total_loss = total_loss - (output_dict["log_probs"].squeeze(-1) * step_reward_t).mean()
-
-    optimizer.zero_grad(set_to_none=True)
-    total_loss.backward()
-    optimizer.step()
-    
-    # Recomputing the graph for a separate backward.
-    h_t_det = output_dict["memory_hidden"].detach()
-    z_e = model.vision.encode(state_tensor, is_image_based=is_image_based)
-    if is_image_based:
-        z_t = z_e.mean(dim=(2, 3))
+        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
+        state_transposed = np.transpose(state, (2, 0, 1))
+        state_tensor = torch.from_numpy(state_transposed).float().unsqueeze(0).to(device)
+        # Normalize image data to [0, 1]
+        state_tensor = state_tensor / 255.0
     else:
-        z_t = z_e
-    z_t_det = z_t.detach()
+        # For vector data, just add batch dimension and move to device
+        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
 
-    action_for_policy, log_probs_det, value_det, entropy_det = model.controller(z_t_det, h_t_det)
-    # log_probs_det (B,1); value_det (B,1)
-    log_probs = log_probs_det.view(-1)
-    value = value_det.view(-1)
-    entropy = entropy_det.view(-1)
+    output_dict = model(state_tensor, return_losses=True, action_space=action_space)
+    # print(output_dict)
+    total_loss = torch.sum(output_dict["total_loss"]) - (reward * output_dict["log_probs"]).mean()
 
-    """discounted_return = gamma * discounted_return + step_reward_t
-    discounted_return[dones] = 0.0
-    advantage = (discounted_return - value).detach()"""
-
-    td_target = step_reward_t + gamma * value.detach() * (~dones)  # shape (B,)
-    advantage = td_target - value
-    # Normalization across batch for stability.
-    adv_mean = advantage.mean()
-    adv_std = advantage.std(unbiased=False) + 1e-8
-    advantage = (advantage - adv_mean) / adv_std
-
-    policy_loss = -(log_probs * advantage).mean()
-    value_loss = loss_instance(value, discounted_return)
-    #print("memory_loss", memory_loss.detach().item())
-    #print("policy_loss", policy_loss.detach().item())
-    #print("total_loss", total_loss.detach().item())
-
-    entropy_coeff = 0.01  # TODO: To be determined in [0.0, 0.1].
-    entropy_loss = - entropy_coeff * entropy.mean()
-    policy_loss = policy_loss + entropy_loss
-    
-    policy_optimizer.zero_grad(set_to_none=True)
-    (policy_loss + value_loss).backward()
-    policy_optimizer.step()
+    total_loss.backward()
 
     if tensorboard_writer is not None:
-        tensorboard_writer.add_scalar("train/loss", total_loss.mean().item(), iter_num)
-        tensorboard_writer.add_scalar("train/policy_loss", policy_loss.item(), iter_num)
-        tensorboard_writer.add_scalar("train/value_loss", value_loss.item(), iter_num)
+        tensorboard_writer.add_scalar("train/loss", total_loss.item(), iter_num)
         for name, param in model.named_parameters():
-            if param.grad is not None:
-                tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
+            assert param is not None, "Parameter {} is None".format(name)
+            #log the gradient that all
 
-    return cumulated_reward, total_loss.detach(), new_state, dones
+            tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
-# TODO: Remove render_env arg when rendering of the first env is not done through cv2 anymore.
-def train(model: WorldModel, envs, max_iter=10000, device:torch.device=torch.device('cpu'), use_tensorboard: bool = True, learning_rate: float = 0.01, loss_func: callable=MSELoss, save_path="./", render_mode:str=""):
-    world_params = list(model.vision.parameters()) + list(model.memory.parameters())
-    if model.reward_predictor is not None:
-        world_params += list(model.reward_predictor.parameters())
-    policy_params = list(model.controller.parameters())
-    
-    optimizer = torch.optim.AdamW(world_params, lr=learning_rate)
-    policy_optimizer = torch.optim.AdamW(policy_params, lr=learning_rate)
-    loss_func = loss_func()  # Add potential args here.
+    optimizer.step()
+
+    return output_dict["action"], total_loss.item()
+
+
+def train(model: WorldModel, envs, max_iter=10000, device='cpu', use_tensorboard: bool = True, learning_rate:float = 0.01):
+    """
+    Legacy training function (simple policy gradient).
+    NOTE: This has known issues. Use train_a2c.py for better results.
+    """
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     is_image_based = len(envs.single_observation_space.shape) == 3
     action_space = envs.single_action_space
+    num_envs = envs.num_envs
 
-    writer = HyperSummaryWriter() if use_tensorboard else None
+    writer = SummaryWriter() if use_tensorboard else None
 
-    cumulated_reward = torch.zeros(envs.num_envs, device=device, dtype=torch.float32) # , dtype=torch.get_default_dtype()
+    last_rewards = np.zeros(num_envs)
 
-    best_loss = torch.inf
-    last_save = model.iter_num
-    nb_experiments = 0
-    state, info = envs.reset()
-    local_iter_num = torch.zeros(envs.num_envs)
-    total_episode_loss = torch.zeros(envs.num_envs)
+    for iter_num in range(max_iter):
+        state, info = envs.reset()
+        dones = np.zeros(num_envs, dtype=bool)
+        total_episode_loss = 0
+        steps = 0
 
-    # For the reinforce-style loss.
-    discounted_return = torch.zeros(envs.num_envs, device=device)
-    gamma = 0.99
+        while not dones.all():
+            action_tensor, loss = step(model,
+                                       state,
+                                       optimizer,
+                                       device,
+                                       is_image_based,
+                                       action_space,
+                                       last_rewards.mean(),  # Use mean reward
+                                       iter_num=iter_num,
+                                       tensorboard_writer=writer)
 
-    while nb_experiments < max_iter:
-        
-        cumulated_reward, loss, state, dones = step(model,
-                                    state,
-                                    envs,
-                                    optimizer,
-                                    policy_optimizer,
-                                    device,
-                                    is_image_based,
-                                    action_space,
-                                    cumulated_reward,
-                                    discounted_return,
-                                    gamma,
-                                    iter_num=model.iter_num,
-                                    tensorboard_writer=writer,
-                                    loss_instance=loss_func)
+            # Handle different action spaces
+            if isinstance(action_space, gym.spaces.Discrete):
+                action_np = action_tensor.cpu().numpy()
+            else:  # Continuous action space
+                action_np = action_tensor.cpu().detach().numpy()
 
-        total_episode_loss += loss
+            next_state, rewards, terminated, truncated, info = envs.step(action_np)
+            dones = terminated | truncated
+            state = next_state
+            last_rewards = rewards
+            total_episode_loss += loss
+            steps += 1
 
-        if render_mode  == 'human':
-            render_first_env(envs)
+            # Reset memories for done environments
+            for env_idx in np.where(dones)[0]:
+                model.reset_env_memory(env_idx)
 
-        model.iter_num += envs.num_envs
-        local_iter_num += 1
-
-        if loss < best_loss and model.iter_num > last_save + 5 * envs.num_envs:
-            best_loss = loss
-            last_save = model.iter_num
-            model.save(f"{save_path}{envs.spec.id}.pt", envs.single_observation_space, envs.single_action_space)
-
-        # logger.info(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
-        cumulated_reward[dones] = 0
-        finished_envs = torch.where(dones)[0]
-        for env_id in finished_envs:
-            print(f"Experiment {model.nb_experiments + 1}\nEnded at iteration {local_iter_num[env_id]}, Mean Loss: {total_episode_loss[env_id]/local_iter_num[env_id]:.4f}")
-            model.nb_experiments += 1
-            local_iter_num[env_id] = 0
-            total_episode_loss[env_id] = 0
-            nb_experiments += 1
-            model.reset_env_memory(env_id)
-
-
+        print(f"Iteration {iter_num + 1}/{max_iter}, Steps: {steps}, Total Loss: {total_episode_loss:.4f}, Mean Reward: {last_rewards.mean():.2f}")

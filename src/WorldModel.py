@@ -129,9 +129,18 @@ class WorldModel(Model):
         
         h_t = self.memory.update_memory(z_t, self.a_prev)
 
-        
+
         # === CONTROLLER ===
-        action, log_probs, value, _entropy = self.controller(z_t, h_t)
+        # Check if controller supports planning (improved controllers)
+        if hasattr(self.controller, 'use_planning') and self.controller.use_planning:
+            action, log_probs, value, _entropy = self.controller(
+                z_t, h_t,
+                memory_model=self.memory,
+                reward_predictor=self.reward_predictor
+            )
+        else:
+            action, log_probs, value, _entropy = self.controller(z_t, h_t)
+
         if isinstance(action_space, gym.spaces.Discrete):
             n = action_space.n
 
@@ -153,9 +162,11 @@ class WorldModel(Model):
         
         # === LOSSES ===
         # Vision reconstruction loss
-        recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(dim=tuple(range(1, recon.dim()))) 
-        
-        # Memory prediction loss (si z_next_actual est fourni)
+        recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(dim=tuple(range(1, recon.dim())))
+
+        # NOTE: Memory prediction loss is not included here because we don't have z_{t+1} yet
+        # during a single forward pass. This should be computed in the training loop when
+        # we have the next observation. See the A2C training loop for proper implementation.
         total_loss = recon_loss.mean() + vq_loss.mean()
         
         outputs = {

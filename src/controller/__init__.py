@@ -1,2 +1,5 @@
 from .DiscreteModelPredictiveController import DiscreteModelPredictiveController
+from .ContinuousModelPredictiveController import ContinuousModelPredictiveController
 from .StochasticController import StochasticController
+from .ImprovedDiscreteController import ImprovedDiscreteController
+from .ImprovedContinuousController import ImprovedContinuousController
