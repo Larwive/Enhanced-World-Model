@@ -11,8 +11,11 @@ from memory.TemporalTransformer import TemporalTransformer
 from controller.DiscreteModelPredictiveController import DiscreteModelPredictiveController
 from controller.ContinuousModelPredictiveController import ContinuousModelPredictiveController
 from controller.StochasticController import StochasticController
+from controller.ImprovedDiscreteController import ImprovedDiscreteController
+from controller.ImprovedContinuousController import ImprovedContinuousController
 from WorldModel import WorldModel
 from train import train
+from train_a2c import train_a2c
 from pretrain import pretrain
 from reward_predictor.LinearPredictor import LinearPredictorModel
 from reward_predictor.DensePredictor import DensePredictorModel
@@ -59,6 +62,16 @@ def main():
     parser.add_argument('--pretrain-mode', type=str, default='random', choices=['manual', 'random'])
     parser.add_argument('--pretrain-vision', action='store_true')
     parser.add_argument('--pretrain-memory', action='store_true')
+
+    # Controller and training method args
+    parser.add_argument('--use-improved-controller', action='store_true',
+                       help='Use improved MLP-based controller with planning capabilities.')
+    parser.add_argument('--use-a2c', action='store_true',
+                       help='Use A2C training instead of simple policy gradient.')
+    parser.add_argument('--planning-horizon', type=int, default=5,
+                       help='Planning horizon for model-predictive controller.')
+    parser.add_argument('--n-steps', type=int, default=128,
+                       help='Number of steps per A2C update.')
 
 
     args = parser.parse_args()
@@ -109,13 +122,30 @@ def main():
         action_space = envs.single_action_space
         if isinstance(action_space, gym.spaces.Discrete):
             action_dim = action_space.n  # action_space.n is actually the number of possible values
-            controller_model = DiscreteModelPredictiveController
+            if args.use_improved_controller:
+                controller_model = ImprovedDiscreteController
+                controller_args = {
+                    "action_dim": action_dim,
+                    "use_planning": True,
+                    "planning_horizon": args.planning_horizon
+                }
+            else:
+                controller_model = DiscreteModelPredictiveController
+                controller_args = {"action_dim": action_dim}
         else:  # Box, etc.
             action_dim = action_space.shape[0]
-            controller_model = ContinuousModelPredictiveController
+            if args.use_improved_controller:
+                controller_model = ImprovedContinuousController
+                controller_args = {
+                    "action_dim": action_dim,
+                    "use_planning": True,
+                    "planning_horizon": args.planning_horizon
+                }
+            else:
+                controller_model = ContinuousModelPredictiveController
+                controller_args = {"action_dim": action_dim}
 
         memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "action_dim": action_dim, "nhead": 8}
-        controller_args = {"action_dim": action_dim}
         logger.info(f"Vision model: {vision_model}")
         # Initialize the World Model
         world_model = WorldModel(
@@ -158,7 +188,18 @@ def main():
                 for param in world_model.parameters():
                     param.requires_grad = True
                 world_model.train()
-            train(world_model, envs, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, render_mode = args.render_mode)
+
+            # Choose training method
+            if args.use_a2c:
+                logger.info("Using A2C training with improved advantages")
+                train_a2c(world_model, envs, max_epochs=args.max_epoch, n_steps=args.n_steps,
+                         device=device, learning_rate=args.learning_rate,
+                         save_path=args.save_path)
+            else:
+                logger.info("Using simple policy gradient training (legacy)")
+                train(world_model, envs, max_iter=args.max_epoch, device=device,
+                     learning_rate=args.learning_rate)
+
             world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
 
             logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")

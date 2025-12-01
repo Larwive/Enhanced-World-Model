@@ -37,6 +37,9 @@ class TemporalTransformer(Model):
         """
         z_t:   (B, latent_dim)
         a_prev:(B, action_dim)
+
+        IMPROVED: Allows gradient flow through current timestep while maintaining
+        buffer stability by detaching historical entries.
         """
 
         B = z_t.size(0)
@@ -46,21 +49,22 @@ class TemporalTransformer(Model):
             self.seq_buffer = torch.zeros(B, self.max_len, self.d_model, device=device)
             self.seq_lengths = torch.zeros(B, dtype=torch.long, device=device)
 
-        x = torch.cat([z_t.detach(), a_prev.detach()], dim=-1)
-        x = self.memory_input_proj(x).unsqueeze(1) #.detach()
+        # FIXED: Don't detach z_t and a_prev - allow gradients to flow
+        x = torch.cat([z_t, a_prev], dim=-1)
+        x = self.memory_input_proj(x).unsqueeze(1)
 
+        # Update buffer with detached version (for memory persistence)
         self.seq_buffer = torch.roll(self.seq_buffer, shifts=-1, dims=1)
-        self.seq_buffer[:, -1] = x.squeeze(1)
+        self.seq_buffer[:, -1] = x.squeeze(1).detach()
         self.seq_lengths = torch.clamp(self.seq_lengths + 1, max=self.max_len)
 
-        memory_in = self.seq_buffer.clone().detach()           # clone of detached entries
-        memory_in[:, -1] = x.squeeze(1)          # replace last with grad-connected tensor
+        # For transformer forward: use detached history but gradient-connected current
+        memory_in = self.seq_buffer.clone()  # Already detached from buffer update
+        memory_in[:, -1] = x.squeeze(1)       # Replace last with grad-connected tensor
 
         mask = torch.arange(self.max_len, device=device).unsqueeze(0) >= self.seq_lengths.unsqueeze(1)
 
         memory_out = self.transformer(memory_in, src_key_padding_mask=mask)
-        # Limitation du backpropagation
-        # memory_out = self.transformer(self.seq_buffer[:, -k:], src_key_padding_mask=mask[:, -k:])
 
         last_indices = self.seq_lengths - 1
         h_t = memory_out[torch.arange(B, device=device), last_indices]
