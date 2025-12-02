@@ -10,6 +10,7 @@ class Identity(Model):
         super().__init__()
         self.input_shape = input_shape
         self.embed_dim = input_shape[0]
+        print(f"[DEBUG Identity.__init__] input_shape={input_shape}, embed_dim={self.embed_dim}, _kwargs={_kwargs}")
 
     def forward(self, input):
         # Return the input as the "reconstruction" and a zero loss

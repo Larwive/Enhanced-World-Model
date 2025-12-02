@@ -26,6 +26,7 @@ class ImprovedDiscreteController(Model):
 
         # Build policy network (MLP with layer norm)
         input_dim = z_dim + h_dim
+        print(f"[DEBUG ImprovedDiscreteController.__init__] z_dim={z_dim}, h_dim={h_dim}, input_dim={input_dim}, action_dim={action_dim}")
         layers = []
         prev_dim = input_dim
 
@@ -77,7 +78,9 @@ class ImprovedDiscreteController(Model):
             entropy: (B, 1) - policy entropy
         """
         # Get base policy
+        print(f"[DEBUG ImprovedDiscreteController.forward] z_t.shape={z_t.shape}, h_t.shape={h_t.shape}")
         x = torch.cat([z_t, h_t], dim=-1)
+        print(f"[DEBUG ImprovedDiscreteController.forward] x.shape after cat={x.shape}, expected={self.z_dim + self.h_dim}")
         logits = self.policy(x)  # (B, action_dim)
 
         # Apply planning if enabled and components provided

@@ -92,6 +92,8 @@ class WorldModel(Model):
         self.memory_d_model = memory_args.get("d_model", 128) # Default to 128 if not specified
         self.action_dim = controller_args["action_dim"]
         controller_h_dim = self.memory_d_model
+        print(f"[DEBUG WorldModel.__init__] vision.embed_dim={self.vision.embed_dim}, memory_d_model={self.memory_d_model}, action_dim={self.action_dim}")
+        print(f"[DEBUG WorldModel.__init__] Creating controller with z_dim={self.vision.embed_dim}, h_dim={controller_h_dim}, controller_args={controller_args}")
         self.controller = controller_model(z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args)
 
         self.reward_predictor = None
@@ -132,6 +134,8 @@ class WorldModel(Model):
 
         # === CONTROLLER ===
         # Check if controller supports planning (improved controllers)
+        print(f"[DEBUG WorldModel.forward] Before controller: z_t.shape={z_t.shape}, h_t.shape={h_t.shape}")
+        print(f"[DEBUG WorldModel.forward] Expected: z_dim={self.vision.embed_dim}, h_dim={self.memory_d_model}")
         if hasattr(self.controller, 'use_planning') and self.controller.use_planning:
             action, log_probs, value, _entropy = self.controller(
                 z_t, h_t,
