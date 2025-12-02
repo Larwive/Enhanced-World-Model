@@ -16,19 +16,3 @@ dependencies = [
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/nightly/cu130"]
-
-[tool.uv.dependencies]
-macos = [
-    "torch>=2.9.0",
-    "torchvision>=0.22.1"
-]
-
-windows = [
-    "torch>=2.8.0+cu130",
-    "torchvision>=0.22.1"
-]
-
-linux = [
-    "torch>=2.8.0+cu130",
-    "torchvision>=0.22.1"
-]

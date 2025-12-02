@@ -41,16 +41,16 @@ def step(model,
          tensorboard_writer=None):
     optimizer.zero_grad()
     if is_image_based:
-        # Transpose state from (H, W, C) to (C, H, W) for PyTorch
-        state_transposed = np.transpose(state, (2, 0, 1))
-        state_tensor = torch.from_numpy(state_transposed).float().unsqueeze(0).to(device)
+        # Transpose state from (B, H, W, C) to (B, C, H, W) for PyTorch
+        state_transposed = np.transpose(state, (0, 3, 1, 2))
+        state_tensor = torch.from_numpy(state_transposed).float().to(device)
         # Normalize image data to [0, 1]
         state_tensor = state_tensor / 255.0
     else:
-        # For vector data, just add batch dimension and move to device
-        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
+        # For vector data, just move to device (already has batch dimension)
+        state_tensor = torch.from_numpy(state).float().to(device)
 
-    output_dict = model(state_tensor, return_losses=True, action_space=action_space)
+    output_dict = model(state_tensor, action_space=action_space, is_image_based=is_image_based, return_losses=True)
     # print(output_dict)
     total_loss = torch.sum(output_dict["total_loss"]) - (reward * output_dict["log_probs"]).mean()
 
@@ -61,8 +61,8 @@ def step(model,
         for name, param in model.named_parameters():
             assert param is not None, "Parameter {} is None".format(name)
             #log the gradient that all
-
-            tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
+            if param.grad is not None:
+                tensorboard_writer.add_scalar(f"gradients/{name}", param.grad.norm().item(), iter_num)
 
     optimizer.step()
 
