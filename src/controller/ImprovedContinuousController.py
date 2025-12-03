@@ -144,11 +144,9 @@ class ImprovedContinuousController(Model):
                 # Predict next state
                 z_next = memory_model.predict_next(z_curr, action, h_curr)
 
-                # Estimate reward
-                if reward_predictor is not None:
-                    step_value = reward_predictor(z_curr, h_curr, action).squeeze(-1)
-                else:
-                    step_value = self.planning_value(z_next).squeeze(-1)
+                # Estimate value of next state using planning value head
+                # Note: reward_predictor is designed for (z, h, last_reward), not actions
+                step_value = self.planning_value(z_next).squeeze(-1)
 
                 total_value = total_value + (gamma ** step) * step_value
 
