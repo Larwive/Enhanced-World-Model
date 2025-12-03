@@ -62,13 +62,12 @@ class ImprovedContinuousController(Model):
                 nn.Linear(hidden_dims[0], 1)
             )
 
-    def forward(self, z_t, h_t, memory_model=None, reward_predictor=None, deterministic=False):
+    def forward(self, z_t, h_t, memory_model=None, deterministic=False):
         """
         Args:
             z_t: (B, z_dim) - current latent state
             h_t: (B, h_dim) - memory hidden state
             memory_model: TemporalTransformer instance for planning
-            reward_predictor: optional reward predictor for planning
             deterministic: if True, return mean action
 
         Returns:
@@ -88,7 +87,7 @@ class ImprovedContinuousController(Model):
         # Apply planning if enabled and components provided
         if self.use_planning and memory_model is not None and self.training:
             # Do model-predictive planning to refine mean action
-            planning_mu = self._plan_actions(z_t, h_t, memory_model, reward_predictor, mu)
+            planning_mu = self._plan_actions(z_t, h_t, memory_model, mu)
             # Blend: 70% base policy + 30% planning
             mu = 0.7 * mu + 0.3 * planning_mu
 
@@ -111,7 +110,7 @@ class ImprovedContinuousController(Model):
 
         return action, logp, value, entropy
 
-    def _plan_actions(self, z_t, h_t, memory_model, reward_predictor, base_mu):
+    def _plan_actions(self, z_t, h_t, memory_model, base_mu):
         """
         Perform short-horizon planning using the world model.
         Uses CEM (Cross-Entropy Method) to find good actions.

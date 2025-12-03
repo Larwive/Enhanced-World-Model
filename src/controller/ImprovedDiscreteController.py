@@ -62,13 +62,12 @@ class ImprovedDiscreteController(Model):
                 nn.Linear(hidden_dims[0], 1)
             )
 
-    def forward(self, z_t, h_t, memory_model=None, reward_predictor=None, deterministic=False):
+    def forward(self, z_t, h_t, memory_model=None, deterministic=False):
         """
         Args:
             z_t: (B, z_dim) - current latent state
             h_t: (B, h_dim) - memory hidden state
             memory_model: TemporalTransformer instance for planning
-            reward_predictor: optional reward predictor for planning
             deterministic: if True, take argmax instead of sampling
 
         Returns:
@@ -86,7 +85,7 @@ class ImprovedDiscreteController(Model):
         # Apply planning if enabled and components provided
         if self.use_planning and memory_model is not None and self.training:
             # Do model-predictive planning to refine action distribution
-            planning_logits = self._plan_actions(z_t, h_t, memory_model, reward_predictor)
+            planning_logits = self._plan_actions(z_t, h_t, memory_model)
             # Blend: 70% base policy + 30% planning
             logits = 0.7 * logits + 0.3 * planning_logits
 
@@ -103,7 +102,7 @@ class ImprovedDiscreteController(Model):
 
         return action, logp, value, entropy
 
-    def _plan_actions(self, z_t, h_t, memory_model, reward_predictor):
+    def _plan_actions(self, z_t, h_t, memory_model):
         """
         Perform short-horizon planning using the world model.
 

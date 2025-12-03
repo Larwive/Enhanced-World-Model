@@ -143,8 +143,7 @@ class WorldModel(Model):
         if hasattr(self.controller, 'use_planning') and self.controller.use_planning:
             action, log_probs, value, _entropy = self.controller(
                 z_t, h_t,
-                memory_model=self.memory,
-                reward_predictor=self.reward_predictor
+                memory_model=self.memory
             )
         else:
             action, log_probs, value, _entropy = self.controller(z_t, h_t)
