@@ -123,12 +123,16 @@ class WorldModel(Model):
         # z_next_pred, h_t = self.memory(z_t)
         # z_next_pred: (B, latent_dim, 1, 1)
         # h_t: (B, d_model=128)
-        if self.a_prev is None:
-            sample_shape = np.shape(action_space.sample())
-            if sample_shape == ():
-                sample_shape = (self.action_dim,)
-            self.a_prev = torch.zeros((input.shape[0], *sample_shape), device=input.device, dtype=torch.float32)
-        
+
+        # Initialize or resize a_prev to match current batch size
+        current_batch_size = input.shape[0]
+        sample_shape = np.shape(action_space.sample())
+        if sample_shape == ():
+            sample_shape = (self.action_dim,)
+
+        if self.a_prev is None or self.a_prev.shape[0] != current_batch_size:
+            self.a_prev = torch.zeros((current_batch_size, *sample_shape), device=input.device, dtype=torch.float32)
+
         h_t = self.memory.update_memory(z_t, self.a_prev)
 
 

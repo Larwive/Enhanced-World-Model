@@ -45,7 +45,8 @@ class TemporalTransformer(Model):
         B = z_t.size(0)
         device = z_t.device
 
-        if self.seq_buffer is None:
+        # Initialize or resize buffer to match current batch size
+        if self.seq_buffer is None or self.seq_buffer.size(0) != B:
             self.seq_buffer = torch.zeros(B, self.max_len, self.d_model, device=device)
             self.seq_lengths = torch.zeros(B, dtype=torch.long, device=device)
 
