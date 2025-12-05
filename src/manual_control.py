@@ -3,11 +3,11 @@ import numpy as np
 
 from WorldModel import describe_action_space
 
-def register_input(interface):
+def register_input(envs):
     restart, quit = False, False
-    a = describe_action_space(interface.env.action_space)["low"]  # Valid default value
+    a = describe_action_space(envs.single_action_space)["low"]  # Valid default value
 
-    match interface.env.spec.id:
+    match envs.spec.id:
         case "CarRacing-v3":
     
             for event in pygame.event.get():
