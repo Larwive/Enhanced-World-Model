@@ -1,13 +1,14 @@
-from interface import GymEnvInterface
+import gymnasium as gym
 
 # Example usage with CartPole-v1
-interface = GymEnvInterface("CarRacing-v3", render_mode="human")  # CartPole-v1
-state = interface.reset()
+env = gym.make("CarRacing-v3", render_mode="human")  # CartPole-v1
+state = env.reset()
+done = False
 
-while not interface.done:
+while not done:
+    action = env.action_space.sample()  # Replace with your model's action
+    next_state, reward, terminated, truncated, info = env.step(action)
+    done = terminated or truncated
+    env.render()
 
-    action = interface.env.action_space.sample()  # Replace with your model's action
-    next_state, reward, done, info = interface.step(action)
-    interface.render()
-
-interface.close()
+env.close()

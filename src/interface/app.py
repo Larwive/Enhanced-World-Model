@@ -1,6 +1,5 @@
 import gradio as gr
 import subprocess
-import gymnasium as gym
 from gymnasium.envs.registration import registry
 import os
 import sys

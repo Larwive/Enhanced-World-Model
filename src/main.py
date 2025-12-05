@@ -5,11 +5,11 @@ import gymnasium as gym
 import logging
 
 
-from interface.interface import GymEnvInterface
 from vision.VQ_VAE import VQ_VAE
 from vision.Identity import Identity
-from memory.TemporalTransformerXCPC import TemporalTransformer
-from controller.ModelPredictiveController import ModelPredictiveController
+from memory.TemporalTransformer import TemporalTransformer
+from controller.DiscreteModelPredictiveController import DiscreteModelPredictiveController
+from controller.ContinuousModelPredictiveController import ContinuousModelPredictiveController
 from controller.StochasticController import StochasticController
 from WorldModel import WorldModel
 from train import train
@@ -52,7 +52,7 @@ def main():
     parser.add_argument('--load-path', default='')
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--render-mode', type=str, default='rgb_array')
-
+    parser.add_argument('--env-batch-number', type=str, default='auto')
 
     # Pretraining args
     parser.add_argument('--manual-mode-delay', type=float, default=0.05, help='Delay between each step during manual training.')
@@ -62,6 +62,13 @@ def main():
 
 
     args = parser.parse_args()
+
+    env_batch_size = int(args.env_batch_number) if args.env_batch_number.isdigit() else "auto"
+    if env_batch_size == "auto":
+        # TODO: Automatically determines the maximum size of the batch.
+        env_batch_size = 2
+
+    logger.info(f"Running with {env_batch_size} parallel environments.")
 
     if args.ui:
         import subprocess
@@ -75,9 +82,14 @@ def main():
 
     try:
         if args.pretrain_vision and args.pretrain_mode == "manual":
-            args.render_mode = "human"
-        interface = GymEnvInterface(args.env_name, render_mode=args.render_mode)
-        obs_space = interface.env.observation_space
+            args.render_mode = "rgb_array" #"human"
+        
+        real_render_mode = args.render_mode
+        if args.render_mode == "human":  # Temporary `if` as long as the rendering of the first env is done through cv2.
+            real_render_mode = "rgb_array"
+
+        envs = gym.make_vec(args.env_name, num_envs=env_batch_size, render_mode=real_render_mode) #args.render_mode)
+        obs_space = envs.single_observation_space
         is_image_based = len(obs_space.shape) == 3
 
         if is_image_based:
@@ -94,30 +106,32 @@ def main():
             vision_args = {"embed_dim": obs_space.shape[0]}
 
         # Configure memory and controller based on environment
-        action_space = interface.env.action_space
+        action_space = envs.single_action_space
         if isinstance(action_space, gym.spaces.Discrete):
-            action_dim = 1  # action_space.n is actually the number of possible values
+            action_dim = action_space.n  # action_space.n is actually the number of possible values
+            controller_model = DiscreteModelPredictiveController
         else:  # Box, etc.
             action_dim = action_space.shape[0]
+            controller_model = ContinuousModelPredictiveController
 
-        memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "nhead": 8}
+        memory_args = {"d_model": 128, "latent_dim": vision_args["embed_dim"], "action_dim": action_dim, "nhead": 8}
         controller_args = {"action_dim": action_dim}
         logger.info(f"Vision model: {vision_model}")
         # Initialize the World Model
         world_model = WorldModel(
             vision_model=vision_model,
             memory_model=TemporalTransformer,
-            controller_model=ModelPredictiveController,#StochasticController,  #ModelPredictiveController,
+            controller_model=controller_model,#StochasticController,  #ModelPredictiveController,
             input_shape=input_shape,
             vision_args=vision_args,
             memory_args=memory_args,
             controller_args=controller_args,
         ).to(device)
 
-        world_model.set_reward_predictor(DensePredictorModel)
+        world_model.set_reward_predictor(LinearPredictorModel)
 
         if args.load_path:
-            print("Loading model...")
+            print(f"Loading model from {args.load_path}")
             world_model.load(args.load_path, obs_space=obs_space, action_space=action_space)
 
 
@@ -138,15 +152,18 @@ def main():
                     param.requires_grad = False
 
             save_prefix = "" + ("V" if args.pretrain_vision else "") + ("M" if args.pretrain_memory else "")
-            pretrain(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path, save_prefix=save_prefix, pretrain_vision=args.pretrain_vision, pretrain_memory=args.pretrain_memory)
+            pretrain(world_model, envs, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, mode=args.pretrain_mode, delay=args.manual_mode_delay, save_path=args.save_path, save_prefix=save_prefix, pretrain_vision=args.pretrain_vision, pretrain_memory=args.pretrain_memory, render_mode = args.render_mode)
         else:
-            train(world_model, interface, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate)
+            if args.load_path:
+                for param in world_model.parameters():
+                    param.requires_grad = True
+                world_model.train()
+            train(world_model, envs, max_iter=args.max_epoch, device=device, learning_rate=args.learning_rate, render_mode = args.render_mode)
             world_model.save(f"{args.save_path}{args.env_name}_world_model.pt", obs_space=obs_space, action_space=action_space)
 
             logger.info(f"Model saved to {args.save_path}{args.env_name}_world_model.pt")
 
-        # Close the environment
-        interface.close()
+        envs.close()
         logger.info("Environment closed.")
     except Exception as e:
         logger.exception(f"Exception during training: {e}")
