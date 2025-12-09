@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from Model import Model
+from vision import VisionModel
 
 
 class ResidualBlock(torch.nn.Module):
@@ -141,7 +141,7 @@ class VectorQuantizerEMA(torch.nn.Module):
         return z_q_st, commitment_loss, indices.view(z_e.shape[0], z_e.shape[2], z_e.shape[3])
 
 
-class VQ_VAE(Model):
+class VQ_VAE(VisionModel):
     """
     Implementation of the VQ-VAE model (https://arxiv.org/pdf/1711.00937).
     """
