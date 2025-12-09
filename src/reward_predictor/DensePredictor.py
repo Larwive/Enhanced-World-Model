@@ -1,9 +1,10 @@
 import torch
 from torch import nn
-from Model import Model
+
+from reward_predictor import RewardPredictorModel
 
 
-class DensePredictorModel(Model):
+class DensePredictor(RewardPredictorModel):
     def __init__(self, z_dim, h_dim, action_dim=None, **_kwargs):
         super().__init__()
 
