@@ -21,15 +21,16 @@ Thank you for your interest in contributing to the Enhanced World Model project!
 
 ### Prerequisites
 
-- Python 3.8+
-- PyTorch 2.0+
+- Python 3.11+
+- PyTorch 2.8+
 - Git
+- uv package manager
 
 ### Initial Setup
 
 1. **Fork and clone the repository:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Enhanced-World-Model.git
+   git clone https://github.com/Larwive/Enhanced-World-Model.git
    cd Enhanced-World-Model
    ```
 
@@ -51,10 +52,17 @@ Thank you for your interest in contributing to the Enhanced World Model project!
    pip install -e ".[dev]"
    ```
 
-3. **Set up pre-commit hooks (optional but recommended):**
+3. **Set up pre-commit hooks (required):**
    ```bash
-   pre-commit install
+   uv run pre-commit install
    ```
+
+   Pre-commit will automatically run code quality checks before each commit:
+   - Trailing whitespace removal
+   - End-of-file fixing
+   - YAML/TOML validation
+   - Ruff linting and formatting
+   - Mypy type checking
 
 ---
 
@@ -85,14 +93,21 @@ Always create a new branch from `main` (see [Branch Naming Convention](#branch-n
 ### 4. Test Your Changes
 
 ```bash
+# Run all pre-commit checks manually (recommended before committing)
+uv run pre-commit run --all-files
+
 # Run type checking
-mypy src/
+uv run mypy src/
+
+# Run linting and formatting
+uv run ruff check src/
+uv run ruff format src/
 
 # Run tests
-pytest tests/
+uv run pytest tests/
 
 # Run specific test
-pytest tests/test_vision.py -v
+uv run pytest tests/test_vision.py -v
 ```
 
 ### 5. Commit Your Changes
@@ -287,7 +302,9 @@ PR #4: Integrate VQ-VAE into WorldModel
    - [ ] Manual testing completed
 
    ## Checklist
-   - [ ] Code follows project style guidelines
+   - [ ] Pre-commit hooks passing
+   - [ ] Code follows project style guidelines (Ruff)
+   - [ ] Type checking passes (mypy)
    - [ ] Documentation updated (if needed)
    - [ ] Commit messages follow conventions
    - [ ] PR is focused on single issue
@@ -343,14 +360,44 @@ def forward(self, z_t, h_t):
     ...
 ```
 
-### Mypy Configuration
+### Code Quality Tools
+
+We use **pre-commit hooks** to enforce code quality standards automatically. The following tools run on every commit:
+
+#### Ruff (Linter and Formatter)
+
+Ruff is a fast Python linter and formatter that replaces Black, isort, and Flake8.
+
+**Configuration** (in `pyproject.toml`):
+```toml
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+```
+
+**Run manually:**
+```bash
+# Check for issues
+uv run ruff check src/
+
+# Fix issues automatically
+uv run ruff check --fix src/
+
+# Format code
+uv run ruff format src/
+```
+
+#### Mypy (Type Checking)
 
 We use **mypy in normal mode** (not strict) for type checking.
 
-**Configuration** (already in `pyproject.toml`):
+**Configuration** (in `pyproject.toml`):
 ```toml
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -360,6 +407,7 @@ no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
+ignore_missing_imports = true
 
 # Per-module options for gradual typing
 [[tool.mypy.overrides]]
@@ -367,16 +415,16 @@ module = "tests.*"
 disallow_untyped_defs = false
 ```
 
-**Run mypy:**
+**Run manually:**
 ```bash
 # Check entire codebase
-mypy src/
+uv run mypy src/
 
 # Check specific file
-mypy src/vision/VQ_VAE.py
+uv run mypy src/vision/VQ_VAE.py
 
 # Check with verbose output
-mypy --show-error-codes src/
+uv run mypy --show-error-codes src/
 ```
 
 **Common type checking issues:**
@@ -407,13 +455,15 @@ def reset(self, state: Optional[torch.Tensor] = None) -> None:
 - Use **double quotes** for strings
 - Use **4 spaces** for indentation (no tabs)
 
-**Formatting:**
+**Formatting is automated via Ruff:**
 ```bash
-# Format code (if black is installed)
-black src/ --line-length 100
+# Format code
+uv run ruff format src/
 
-# Check style (if flake8 is installed)
-flake8 src/ --max-line-length 100
+# Check formatting without making changes
+uv run ruff format --check src/
+
+# The pre-commit hook will automatically format your code on commit
 ```
 
 ### Docstrings
@@ -546,9 +596,7 @@ pytest tests/test_vision.py::TestVQVAE::test_forward_pass -v
 
 **Before submitting PR:**
 - [ ] All existing tests pass
-- [ ] New tests added for new functionality
-- [ ] Coverage doesn't decrease
-- [ ] Tests are meaningful (not just for coverage)
+- [ ] New tests added for new functionality if applicable
 
 ---
 
@@ -626,10 +674,15 @@ git commit -m "add vq-vae with tests and docs"
 ### 2. Test Before Committing
 
 ```bash
-# Pre-commit checklist
-mypy src/                    # Type checking
-pytest tests/                # Tests
-black src/ --check          # Formatting (if using black)
+# Pre-commit checklist (automated via pre-commit hooks)
+uv run pre-commit run --all-files  # Run all checks
+uv run mypy src/                   # Type checking
+uv run pytest tests/               # Tests
+uv run ruff format src/            # Format code
+uv run ruff check --fix src/       # Lint and fix issues
+
+# Or simply commit - pre-commit hooks will run automatically
+git commit -m "your message"
 ```
 
 ### 3. Keep PRs Focused
