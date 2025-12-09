@@ -64,6 +64,7 @@ extend-exclude = [
     ".env",
     "build",
     "dist",
+    "src/interface/Gymnasium",
 ]
 
 [tool.ruff.lint]
@@ -76,7 +77,11 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
 ]
-ignore = []
+ignore = [
+    "E501",  # Line too long (let formatter handle it)
+    "F401",  # Unused imports in __init__.py (re-exports)
+    "B008",  # Function call in argument defaults
+]
 
 [tool.ruff.format]
 quote-style = "double"
