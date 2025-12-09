@@ -198,7 +198,7 @@ def main():
                 render_mode=args.render_mode,
             )
             world_model.save(
-                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pth",
+                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt",
                 obs_space=obs_space,
                 action_space=action_space,
             )

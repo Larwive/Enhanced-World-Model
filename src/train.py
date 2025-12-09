@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -237,7 +238,7 @@ def train(
             best_loss = loss
             last_save = model.iter_num
             model.save(
-                f"{save_path}{envs.spec.id}.pt",
+                f"{save_path}{envs.spec.id}_{datetime.now().isoformat(timespec='minutes')}.pt",
                 envs.single_observation_space,
                 envs.single_action_space,
             )
