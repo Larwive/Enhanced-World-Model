@@ -9,9 +9,14 @@ dependencies = [
     "matplotlib>=3.8.0",
     "numpy>=2.3.1",
     "tensorboard>=2.20.0",
-    "torch>=2.8.0",
-    "torchvision>=0.22.1",
     "gradio>=4.39.0",
+    # Platform-specific PyTorch installations
+    "torch>=2.9.0; sys_platform == 'darwin'",
+    "torchvision>=0.22.1; sys_platform == 'darwin'",
+    "torch>=2.8.0; sys_platform == 'win32'",
+    "torchvision>=0.22.1; sys_platform == 'win32'",
+    "torch>=2.8.0; sys_platform == 'linux'",
+    "torchvision>=0.22.1; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
@@ -21,29 +26,12 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.5.0",
-    "black>=24.0.0",
-    "flake8>=7.0.0",
-    "isort>=5.13.0",
+    "ruff>=0.8.0",
     "pre-commit>=3.6.0",
 ]
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/nightly/cu130"]
-
-[tool.uv.dependencies]
-macos = [
-    "torch>=2.9.0",
-    "torchvision>=0.22.1"
-]
-
-windows = [
-    "torch>=2.8.0+cu130",
-    "torchvision>=0.22.1"
-]
-
-linux = [
-    "torch>=2.8.0+cu130",
-    "torchvision>=0.22.1"
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
@@ -66,21 +54,35 @@ disallow_untyped_defs = false
 module = "*.interface.*"
 disallow_untyped_defs = false
 
-[tool.black]
+[tool.ruff]
 line-length = 100
-target-version = ["py311"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.venv
-  | \.env
-  | build
-  | dist
-)/
-'''
+target-version = "py311"
+extend-exclude = [
+    ".eggs",
+    ".git",
+    ".venv",
+    ".env",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
