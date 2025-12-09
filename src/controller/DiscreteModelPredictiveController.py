@@ -1,10 +1,10 @@
 import torch
 from torch.distributions import Categorical
 
-from Model import Model
+from controller import ControllerModel
 
 
-class DiscreteModelPredictiveController(Model):
+class DiscreteModelPredictiveController(ControllerModel):
 
     def __init__(self, z_dim, h_dim, action_dim):
         super().__init__()
@@ -16,7 +16,7 @@ class DiscreteModelPredictiveController(Model):
         self.policy = torch.nn.Linear(z_dim + h_dim, action_dim)
 
         self.value = torch.nn.Linear(h_dim, 1)
-    
+
     def forward(self, z_t, h_t):
         # z_t: (B, z_dim) and h_t: (B, h_dim)
         x = torch.cat([z_t, h_t], dim=-1)
