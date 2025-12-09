@@ -1,7 +1,7 @@
 import pygame
-import numpy as np
 
 from WorldModel import describe_action_space
+
 
 def register_input(envs):
     restart, quit = False, False
@@ -9,7 +9,6 @@ def register_input(envs):
 
     match envs.spec.id:
         case "CarRacing-v3":
-    
             for event in pygame.event.get():
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
@@ -54,6 +53,6 @@ def register_input(envs):
                     if event.key == pygame.K_RIGHT:
                         a[0] = 0.5
             return a, restart, quit
-            
+
         case _:
             raise Exception("Unknown environment.")
