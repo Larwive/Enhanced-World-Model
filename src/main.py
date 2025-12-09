@@ -197,13 +197,15 @@ def main():
                 learning_rate=args.learning_rate,
                 render_mode=args.render_mode,
             )
+
+            save_name = f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
             world_model.save(
-                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt",
+                save_name,
                 obs_space=obs_space,
                 action_space=action_space,
             )
 
-            logger.info(f"Model saved to {args.save_path}{args.env_name}")
+            logger.info(f"Model saved to {save_name}")
 
         envs.close()
         logger.info("Environment closed.")
