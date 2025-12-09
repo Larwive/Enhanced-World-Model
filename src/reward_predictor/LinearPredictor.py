@@ -1,12 +1,9 @@
 import torch
-from torch.distributions import Normal, TransformedDistribution
-from torch.distributions.transforms import TanhTransform
 
-from Model import Model
+from reward_predictor import RewardPredictorModel
 
 
-
-class LinearPredictorModel(Model):
+class LinearPredictor(RewardPredictorModel):
 
     def __init__(self, z_dim, h_dim, action_dim, **_kwargs):
         super().__init__()
