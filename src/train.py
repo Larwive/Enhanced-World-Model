@@ -94,6 +94,7 @@ def step(
     # cumulated_reward[dones] = step_reward_t[dones]
     # cumulated_reward[~dones] += step_reward_t[~dones]
 
+    reward_prediction_loss = None
     if model.reward_predictor is not None:
         predicted_reward = output_dict["predicted_reward"].squeeze(-1)
         reward_prediction_loss = loss_instance(predicted_reward, step_reward_t).mean()
@@ -159,6 +160,19 @@ def step(
         tensorboard_writer.add_scalar("train/loss", total_loss.mean().item(), iter_num)
         tensorboard_writer.add_scalar("train/policy_loss", policy_loss.item(), iter_num)
         tensorboard_writer.add_scalar("train/value_loss", value_loss.item(), iter_num)
+        # Component-specific losses for training observability
+        tensorboard_writer.add_scalar(
+            "train/recon_loss", output_dict["recon_loss"].mean().item(), iter_num
+        )
+        tensorboard_writer.add_scalar(
+            "train/vq_loss", output_dict["vq_loss"].mean().item(), iter_num
+        )
+        tensorboard_writer.add_scalar("train/memory_loss", memory_loss.item(), iter_num)
+        tensorboard_writer.add_scalar("train/entropy_loss", entropy_loss.item(), iter_num)
+        if reward_prediction_loss is not None:
+            tensorboard_writer.add_scalar(
+                "train/reward_loss", reward_prediction_loss.item(), iter_num
+            )
         for name, param in model.named_parameters():
             if param.grad is not None:
                 tensorboard_writer.add_scalar(
