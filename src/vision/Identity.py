@@ -1,7 +1,8 @@
 import torch
-from Model import Model
 
-class Identity(Model):
+from vision import VisionModel
+
+class Identity(VisionModel):
     """
     A dummy vision model that acts as an identity function for 1D vector-based environments.
     It mimics the output of a real vision model to be compatible with the WorldModel class.

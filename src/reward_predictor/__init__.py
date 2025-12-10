@@ -1,2 +1,12 @@
-from .DensePredictor import DensePredictorModel
-from .LinearPredictor import LinearPredictorModel
+from Model import Model
+
+REGISTRY = {}
+
+class RewardPredictorModel(Model):
+    """
+    The base class for reward predictor models.
+    """
+
+    def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            REGISTRY[cls.__name__] = cls

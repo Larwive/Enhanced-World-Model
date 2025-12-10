@@ -5,15 +5,21 @@ from datetime import datetime
 import gymnasium as gym
 import torch
 
-from controller.ContinuousModelPredictiveController import ContinuousModelPredictiveController
-from controller.DiscreteModelPredictiveController import DiscreteModelPredictiveController
-from memory.TemporalTransformer import TemporalTransformer
+import vision
+import memory
+import controller
+import reward_predictor
 from pretrain import pretrain
-from reward_predictor.LinearPredictor import LinearPredictorModel
 from train import train
-from vision.Identity import Identity
-from vision.VQ_VAE import VQ_VAE
+from utils.registry import discover_modules
 from WorldModel import WorldModel
+
+VISION_REGISTRY: dict = discover_modules(vision)
+MEMORY_REGISTRY: dict = discover_modules(memory)
+CONTROLLER_REGISTRY: dict = discover_modules(controller)
+REWARD_PREDICTOR_REGISTRY: dict = discover_modules(reward_predictor)
+
+torch.autograd.set_detect_anomaly(True)
 
 device = (
     torch.device("mps")
@@ -43,7 +49,10 @@ def main():
         help="Launch the Gradio interface instead of training directly.",
     )
     parser.add_argument(
-        "--env-name", type=str, default="CarRacing-v3", help="The Gym environment to use."
+        "--env-name",
+        type=str,
+        default="CarRacing-v3",
+        help="The Gym environment to use.",
     )  # CartPole-v1
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--max-epoch", type=int, default=200)
@@ -56,6 +65,10 @@ def main():
     parser.add_argument("--gpu", default="0")
     parser.add_argument("--render-mode", type=str, default="rgb_array")
     parser.add_argument("--env-batch-number", type=str, default="auto")
+    parser.add_argument("--vision", type=str, default="Identity")
+    parser.add_argument("--memory", type=str, default="TemporalTransformer")
+    parser.add_argument("--controller", type=str, default="DiscreteModelPredictiveController")
+    parser.add_argument("--reward-predictor", type=str, default="LinearPredictor")
 
     # Pretraining args
     parser.add_argument(
@@ -109,22 +122,36 @@ def main():
             # (H, W, C) -> (C, H, W)
             obs_shape = obs_space.shape
             input_shape = (obs_shape[2], obs_shape[0], obs_shape[1])
-            vision_model = VQ_VAE
             vision_args = {"output_dim": input_shape[0], "embed_dim": 64}
         else:
             logger.info("Detected vector-based environment.")
             input_shape = obs_space.shape
-            vision_model = Identity
             vision_args = {"embed_dim": obs_space.shape[0]}
+
+        vision_model = VISION_REGISTRY.get(args.vision, None)
+        if vision_model is None:
+            raise Exception(
+                f"Vision model {args.vision} is not available.\nAvailable models: {list(VISION_REGISTRY.keys())}"
+            )
+
+        memory_model = MEMORY_REGISTRY.get(args.memory, None)
+        if memory_model is None:
+            raise Exception(
+                f"Memory model {args.memory} is not available.\nAvailable models: {list(MEMORY_REGISTRY.keys())}"
+            )
 
         # Configure memory and controller based on environment
         action_space = envs.single_action_space
         if isinstance(action_space, gym.spaces.Discrete):
             action_dim = action_space.n  # action_space.n is actually the number of possible values
-            controller_model = DiscreteModelPredictiveController
         else:  # Box, etc.
             action_dim = action_space.shape[0]
-            controller_model = ContinuousModelPredictiveController
+
+        controller_model = CONTROLLER_REGISTRY.get(args.controller, None)
+        if controller_model is None:
+            raise Exception(
+                f"Controller model {args.controller} is not available.\nAvailable models: {list(CONTROLLER_REGISTRY.keys())}"
+            )
 
         memory_args = {
             "d_model": 128,
@@ -134,10 +161,10 @@ def main():
         }
         controller_args = {"action_dim": action_dim}
         logger.info(f"Vision model: {vision_model}")
-        # Initialize the World Model
+
         world_model = WorldModel(
             vision_model=vision_model,
-            memory_model=TemporalTransformer,
+            memory_model=memory_model,
             controller_model=controller_model,  # StochasticController,  #ModelPredictiveController,
             input_shape=input_shape,
             vision_args=vision_args,
@@ -145,7 +172,13 @@ def main():
             controller_args=controller_args,
         ).to(device)
 
-        world_model.set_reward_predictor(LinearPredictorModel)
+        reward_predictor_model = REWARD_PREDICTOR_REGISTRY.get(args.reward_predictor, None)
+        if reward_predictor_model is None:
+            raise Exception(
+                f"Reward predictor model {args.reward_predictor} is not available.\nAvailable models: {list(REWARD_PREDICTOR_REGISTRY.keys())}"
+            )
+
+        world_model.set_reward_predictor(reward_predictor_model)
 
         if args.load_path:
             print(f"Loading model from {args.load_path}")
@@ -197,13 +230,15 @@ def main():
                 learning_rate=args.learning_rate,
                 render_mode=args.render_mode,
             )
+
+            save_name = f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
             world_model.save(
-                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt",
+                save_name,
                 obs_space=obs_space,
                 action_space=action_space,
             )
 
-            logger.info(f"Model saved to {args.save_path}{args.env_name}")
+            logger.info(f"Model saved to {save_name}")
 
         envs.close()
         logger.info("Environment closed.")

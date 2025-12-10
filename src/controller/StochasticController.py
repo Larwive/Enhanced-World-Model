@@ -2,12 +2,10 @@ import torch
 from torch.distributions import Normal, TransformedDistribution
 from torch.distributions.transforms import TanhTransform
 
-
-from Model import Model
-
+from controller import ControllerModel
 
 
-class StochasticController(Model):
+class StochasticController(ControllerModel):
 
     def __init__(self, z_dim, h_dim, action_dim, **_kwargs):
         super().__init__()
