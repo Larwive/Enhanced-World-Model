@@ -1,5 +1,5 @@
-import pkgutil
 import importlib
+import pkgutil
 
 
 def discover_modules(package) -> dict:
@@ -13,7 +13,7 @@ def discover_modules(package) -> dict:
         package = importlib.import_module(package)
 
     # Testing if is a package or just a module.
-    if not hasattr(package, '__path__'):
+    if not hasattr(package, "__path__"):
         return
 
     for _, name, _ in pkgutil.iter_modules(package.__path__):

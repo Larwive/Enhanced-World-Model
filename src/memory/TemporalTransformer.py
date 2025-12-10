@@ -22,9 +22,7 @@ class TemporalTransformer(MemoryModel):
         self.prior_proj = torch.nn.Linear(latent_dim + action_dim, d_model)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=nhead, 
-            batch_first=True
+            d_model=d_model, nhead=nhead, batch_first=True
         )
         self.transformer = torch.nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
@@ -46,24 +44,24 @@ class TemporalTransformer(MemoryModel):
             self.seq_buffer = torch.zeros(B, self.max_len, self.d_model, device=device)
             self.seq_lengths = torch.zeros(B, dtype=torch.long, device=device)
 
-        x = torch.cat([z_t.detach(), a_prev.detach()], dim=-1)
-        x = self.memory_input_proj(x).unsqueeze(1) #.detach()
+        x = torch.cat([z_t, a_prev], dim=-1)
+        x = self.memory_input_proj(x).unsqueeze(1)
 
         self.seq_buffer = torch.roll(self.seq_buffer, shifts=-1, dims=1)
-        self.seq_buffer[:, -1] = x.squeeze(1)
+        self.seq_buffer[:, -1] = x.squeeze(1).detach()  # Store detached for history
         self.seq_lengths = torch.clamp(self.seq_lengths + 1, max=self.max_len)
 
-        memory_in = self.seq_buffer.clone().detach()           # clone of detached entries
-        memory_in[:, -1] = x.squeeze(1)          # replace last with grad-connected tensor
+        memory_in = self.seq_buffer.clone()  # Clone buffer (already detached entries)
+        memory_in[:, -1] = x.squeeze(1)  # Replace last with grad-connected tensor
 
-        mask = torch.arange(self.max_len, device=device).unsqueeze(0) >= self.seq_lengths.unsqueeze(1)
+        mask = torch.arange(self.max_len, device=device).unsqueeze(0) >= self.seq_lengths.unsqueeze(
+            1
+        )
 
         memory_out = self.transformer(memory_in, src_key_padding_mask=mask)
-        # Limitation du backpropagation
-        # memory_out = self.transformer(self.seq_buffer[:, -k:], src_key_padding_mask=mask[:, -k:])
 
-        last_indices = self.seq_lengths - 1
-        h_t = memory_out[torch.arange(B, device=device), last_indices]
+        # Extract from position -1 where the new grad-connected data was placed
+        h_t = memory_out[:, -1]
 
         return h_t
 
@@ -72,12 +70,12 @@ class TemporalTransformer(MemoryModel):
         Prédit z_{t+1} à partir de (z_t, a_t, h_t)
         """
 
-        x = torch.cat([z_t, a_t], dim=-1)     # (B, latent+action)
-        x = self.prior_proj(x)                # (B, d_model)
+        x = torch.cat([z_t, a_t], dim=-1)  # (B, latent+action)
+        x = self.prior_proj(x)  # (B, d_model)
 
         x = x + h_t
 
-        z_next = self.output_proj(x)          # (B, latent_dim)
+        z_next = self.output_proj(x)  # (B, latent_dim)
         return z_next
 
     def forward(self, z_t, a_prev, a_t):
@@ -103,7 +101,7 @@ class TemporalTransformer(MemoryModel):
             "d_model": self.d_model,
             "nhead": self.nhead,
             "num_layers": self.num_layers,
-            "max_len": self.max_len
+            "max_len": self.max_len,
         }
 
     def save_state(self):
