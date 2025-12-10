@@ -1,14 +1,14 @@
 import torch
 
-from Model import Model
-from .MemoryModel import flatten_vision_latents
+from memory import MemoryModel
 
-class TemporalTransformer(Model):
+
+class TemporalTransformer(MemoryModel):
     def __init__(self, latent_dim=4, action_dim=3, d_model=128, nhead=8, num_layers=4, max_len=32):
         super().__init__()
-        
+
         assert d_model % nhead == 0
-        
+
         self.latent_dim = latent_dim
         self.action_dim = action_dim
         self.input_dim = latent_dim + action_dim

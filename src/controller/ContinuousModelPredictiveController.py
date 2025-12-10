@@ -1,9 +1,10 @@
 import torch
 from torch.distributions import Normal
-from Model import Model
+
+from controller import ControllerModel
 
 
-class ContinuousModelPredictiveController(Model):
+class ContinuousModelPredictiveController(ControllerModel):
 
     def __init__(self, z_dim, h_dim, action_dim):
         super().__init__()
