@@ -18,9 +18,6 @@ class MemoryModel(Model):
         output_dim: Dimension of hidden state (d_model)
     """
 
-    input_dim: int
-    output_dim: int
-
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls

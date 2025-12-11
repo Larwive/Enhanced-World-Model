@@ -18,15 +18,12 @@ class VisionModel(Model):
         embed_dim: Dimension of the encoded latent representation
     """
 
-    input_shape: tuple
-    embed_dim: int
-
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls
 
     @abstractmethod
-    def forward(self, input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, input: torch.Tensor, **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Full forward pass: encode and decode observation.
 
