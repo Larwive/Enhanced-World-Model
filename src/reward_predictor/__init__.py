@@ -18,9 +18,6 @@ class RewardPredictorModel(Model):
         h_dim: Dimension of hidden state (from memory)
     """
 
-    z_dim: int
-    h_dim: int
-
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls

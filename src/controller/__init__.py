@@ -19,10 +19,6 @@ class ControllerModel(Model):
         action_dim: Dimension of action space
     """
 
-    z_dim: int
-    h_dim: int
-    action_dim: int
-
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls
