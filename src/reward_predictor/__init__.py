@@ -27,7 +27,7 @@ class RewardPredictorModel(Model):
 
     @abstractmethod
     def forward(
-        self, z_t: torch.Tensor, h_t: torch.Tensor, last_reward: torch.Tensor
+        self, z_t: torch.Tensor, h_t: torch.Tensor, last_reward: torch.Tensor, **kwargs
     ) -> torch.Tensor:
         """
         Predict next reward from current state.
