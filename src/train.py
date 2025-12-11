@@ -114,6 +114,8 @@ def step(
 
     optimizer.zero_grad(set_to_none=True)
     total_loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.vision.parameters(), max_norm=1.0)
+    torch.nn.utils.clip_grad_norm_(model.memory.parameters(), max_norm=1.0)
     optimizer.step()
 
     # Recomputing the graph for a separate backward.
@@ -142,8 +144,8 @@ def step(
     adv_std = advantage.std(unbiased=False) + 1e-8
     advantage = (advantage - adv_mean) / adv_std
 
-    policy_loss = -(log_probs * advantage).mean()
-    value_loss = loss_instance(value, discounted_return)
+    policy_loss = -(log_probs * advantage.detach()).mean()
+    value_loss = loss_instance(value, td_target.detach())
     # print("memory_loss", memory_loss.detach().item())
     # print("policy_loss", policy_loss.detach().item())
     # print("total_loss", total_loss.detach().item())
@@ -154,6 +156,7 @@ def step(
 
     policy_optimizer.zero_grad(set_to_none=True)
     (policy_loss + value_loss).backward()
+    torch.nn.utils.clip_grad_norm_(model.controller.parameters(), max_norm=0.5)
     policy_optimizer.step()
 
     if tensorboard_writer is not None:
