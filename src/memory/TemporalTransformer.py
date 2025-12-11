@@ -18,11 +18,12 @@ class TemporalTransformer(MemoryModel):
         self.max_len = max_len
 
         self.memory_input_proj = torch.nn.Linear(self.input_dim, d_model)
+        self.input_norm = torch.nn.LayerNorm(d_model)  # Normalize before transformer
 
         self.prior_proj = torch.nn.Linear(latent_dim + action_dim, d_model)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, batch_first=True
+            d_model=d_model, nhead=nhead, batch_first=True, dropout=0.1
         )
         self.transformer = torch.nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
@@ -30,6 +31,21 @@ class TemporalTransformer(MemoryModel):
 
         self.seq_buffer = None
         self.seq_lengths = None
+
+        # Initialize weights for stability
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights for gradient stability."""
+        # Standard initialization - don't use small gains which can cause issues
+        for _, module in self.named_modules():
+            if isinstance(module, torch.nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, torch.nn.LayerNorm):
+                torch.nn.init.ones_(module.weight)
+                torch.nn.init.zeros_(module.bias)
 
     def update_memory(self, z_t, a_prev):
         """
@@ -45,7 +61,9 @@ class TemporalTransformer(MemoryModel):
             self.seq_lengths = torch.zeros(B, dtype=torch.long, device=device)
 
         x = torch.cat([z_t, a_prev], dim=-1)
-        x = self.memory_input_proj(x).unsqueeze(1)
+        x = self.memory_input_proj(x)
+        x = self.input_norm(x)  # Normalize before storing/processing
+        x = x.unsqueeze(1)
 
         self.seq_buffer = torch.roll(self.seq_buffer, shifts=-1, dims=1)
         self.seq_buffer[:, -1] = x.squeeze(1).detach()  # Store detached for history
