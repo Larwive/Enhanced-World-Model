@@ -46,3 +46,22 @@ class ControllerModel(Model):
                 - entropy: Policy entropy, shape (B, 1)
         """
         pass
+
+    @abstractmethod
+    def evaluate_actions(
+        self, z_t: torch.Tensor, h_t: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluate log probability and entropy for given actions (used in PPO).
+
+        Args:
+            z_t: Current latent state, shape (B, z_dim)
+            h_t: Current hidden state, shape (B, h_dim)
+            actions: Actions to evaluate, shape (B,) for discrete or (B, action_dim) for continuous
+
+        Returns:
+            log_prob: Log probability of the actions, shape (B,)
+            value: State value estimate, shape (B,)
+            entropy: Policy entropy, shape (B,)
+        """
+        pass

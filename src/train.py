@@ -38,6 +38,115 @@ class HyperSummaryWriter(SummaryWriter):
                 w_hp.add_scalar(k, v)
 
 
+class RolloutBuffer:
+    """
+    Buffer to store rollout experiences for PPO-style training.
+    """
+
+    def __init__(self, buffer_size: int, num_envs: int, device: torch.device):
+        self.buffer_size = buffer_size
+        self.num_envs = num_envs
+        self.device = device
+        self.reset()
+
+    def reset(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.dones = []
+        self.log_probs = []
+        self.values = []
+        self.z_ts = []  # Latent states
+        self.h_ts = []  # Hidden states
+        self.ptr = 0
+
+    def add(
+        self,
+        state: np.ndarray,
+        action: torch.Tensor,
+        reward: torch.Tensor,
+        done: torch.Tensor,
+        log_prob: torch.Tensor,
+        value: torch.Tensor,
+        z_t: torch.Tensor,
+        h_t: torch.Tensor,
+    ):
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.dones.append(done)
+        self.log_probs.append(log_prob)
+        self.values.append(value)
+        self.z_ts.append(z_t)
+        self.h_ts.append(h_t)
+        self.ptr += 1
+
+    def is_full(self) -> bool:
+        return self.ptr >= self.buffer_size
+
+    def compute_returns_and_advantages(
+        self, last_value: torch.Tensor, gamma: float = 0.99, gae_lambda: float = 0.95
+    ):
+        """
+        Compute GAE (Generalized Advantage Estimation) returns and advantages.
+        """
+        # Stack tensors: shape (buffer_size, num_envs)
+        rewards = torch.stack(self.rewards)  # (T, num_envs)
+        values = torch.stack(self.values)  # (T, num_envs)
+        dones = torch.stack(self.dones)  # (T, num_envs)
+
+        T = len(self.rewards)
+        advantages = torch.zeros(T, self.num_envs, device=self.device)
+        last_gae = torch.zeros(self.num_envs, device=self.device)
+
+        # Compute GAE backwards
+        for t in reversed(range(T)):
+            if t == T - 1:
+                next_value = last_value
+            else:
+                next_value = values[t + 1]
+
+            next_non_terminal = ~dones[t]
+            delta = rewards[t] + gamma * next_value * next_non_terminal - values[t]
+            last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
+            advantages[t] = last_gae
+
+        returns = advantages + values
+        return returns, advantages
+
+    def get_batches(self, batch_size: int, returns: torch.Tensor, advantages: torch.Tensor):
+        """
+        Generate random mini-batches for training.
+        """
+        # Flatten everything: (T * num_envs,)
+        total_size = self.ptr * self.num_envs
+        indices = np.random.permutation(total_size)
+
+        # Stack and flatten
+        actions = torch.stack(self.actions).view(-1)  # (T * num_envs,)
+        log_probs = torch.stack(self.log_probs).view(-1)  # (T * num_envs,)
+        values = torch.stack(self.values).view(-1)  # (T * num_envs,)
+        z_ts = torch.stack(self.z_ts).view(-1, self.z_ts[0].shape[-1])  # (T * num_envs, z_dim)
+        h_ts = torch.stack(self.h_ts).view(-1, self.h_ts[0].shape[-1])  # (T * num_envs, h_dim)
+        returns_flat = returns.view(-1)
+        advantages_flat = advantages.view(-1)
+
+        # Generate mini-batches
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+
+            yield {
+                "actions": actions[batch_indices],
+                "old_log_probs": log_probs[batch_indices],
+                "old_values": values[batch_indices],
+                "z_ts": z_ts[batch_indices],
+                "h_ts": h_ts[batch_indices],
+                "returns": returns_flat[batch_indices],
+                "advantages": advantages_flat[batch_indices],
+            }
+
+
 def state_transform(state, is_image_based, device):
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
@@ -53,139 +162,251 @@ def state_transform(state, is_image_based, device):
         return torch.from_numpy(state).float().to(device)
 
 
-def step(
-    model,
-    state,
+def collect_rollout_step(
+    model: WorldModel,
+    state: np.ndarray,
     envs,
-    optimizer,
-    policy_optimizer,
-    device,
-    is_image_based,
+    device: torch.device,
+    is_image_based: bool,
     action_space,
-    cumulated_reward,
-    discounted_return,
-    gamma,
-    iter_num: int = 0,
-    tensorboard_writer=None,
-    loss_instance=None,
+    cumulated_reward: torch.Tensor,
 ):
-    if loss_instance is None:
-        loss_instance = MSELoss()  # Same as below.
-
+    """
+    Collect a single step of experience without gradient computation.
+    Returns experience data for the rollout buffer.
+    """
     state_tensor = state_transform(state, is_image_based=is_image_based, device=device)
 
-    output_dict = model(
-        state_tensor,
-        action_space=action_space,
-        is_image_based=is_image_based,
-        return_losses=True,
-        last_reward=cumulated_reward,
-    )
-    total_loss = output_dict["total_loss"]
+    with torch.no_grad():
+        output_dict = model(
+            state_tensor,
+            action_space=action_space,
+            is_image_based=is_image_based,
+            return_losses=True,
+            last_reward=cumulated_reward,
+        )
 
-    actions = output_dict["action"].cpu().detach().numpy()
+    actions = output_dict["action"]
+    log_probs = output_dict["log_probs"].squeeze(-1)  # (num_envs,)
+    values = output_dict["value"].squeeze(-1)  # (num_envs,)
+    z_t = output_dict["memory_prediction"]  # Latent state
+    h_t = output_dict["memory_hidden"]  # Hidden state
 
-    new_state, step_reward, terminated, truncated, info = envs.step(actions)
+    # Step environment
+    actions_np = actions.cpu().detach().numpy()
+    new_state, step_reward, terminated, truncated, info = envs.step(actions_np)
     dones = torch.from_numpy(terminated | truncated).to(device, dtype=torch.bool)
-
     step_reward_t = torch.tensor(step_reward, dtype=torch.float32, device=device)
 
-    cumulated_reward += step_reward_t
-    # cumulated_reward[dones] = step_reward_t[dones]
-    # cumulated_reward[~dones] += step_reward_t[~dones]
+    return {
+        "state": state,
+        "action": actions,
+        "reward": step_reward_t,
+        "done": dones,
+        "log_prob": log_probs,
+        "value": values,
+        "z_t": z_t,
+        "h_t": h_t,
+        "new_state": new_state,
+        "output_dict": output_dict,
+    }
 
-    reward_prediction_loss = None
-    if model.reward_predictor is not None:
-        predicted_reward = output_dict["predicted_reward"].squeeze(-1)
-        reward_prediction_loss = loss_instance(predicted_reward, step_reward_t).mean()
-        total_loss = total_loss + reward_prediction_loss
 
-    vision_encoded = model.vision.encode(
-        state_transform(new_state, is_image_based=is_image_based, device=device),
-        is_image_based=is_image_based,
-    )
+def update_world_model(
+    model: WorldModel,
+    states: list,
+    new_states: list,
+    rewards: list,
+    actions: list,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    is_image_based: bool,
+    action_space,
+    loss_func,
+):
+    """
+    Update vision, memory, and reward predictor on collected rollout data.
+    Recomputes forward passes with gradients enabled.
+    """
+    total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+    recon_losses = []
+    vq_losses = []
+    memory_losses = []
+    reward_losses = []
 
-    if is_image_based:
-        vision_encoded = vision_encoded.mean(dim=(2, 3))
+    # Sample a subset of transitions for efficiency (don't train on all 128 steps)
+    num_samples = min(32, len(states))
+    indices = np.random.choice(len(states), num_samples, replace=False)
 
-    memory_loss = torch.nn.functional.mse_loss(vision_encoded, output_dict["memory_prediction"])
-    total_loss = total_loss + memory_loss
-    # total_loss = total_loss - (output_dict["log_probs"].squeeze(-1) * step_reward_t).mean()
+    import gymnasium as gym
+
+    # Determine action encoding
+    if isinstance(action_space, gym.spaces.Discrete):
+        action_dim = action_space.n
+        is_discrete = True
+    else:
+        action_dim = action_space.shape[0]
+        is_discrete = False
+
+    for idx in indices:
+        state = states[idx]
+        new_state = new_states[idx]
+        reward = rewards[idx]
+        action = actions[idx]
+
+        state_tensor = state_transform(state, is_image_based=is_image_based, device=device)
+        new_state_tensor = state_transform(new_state, is_image_based=is_image_based, device=device)
+
+        # Convert action to proper format for memory model
+        if is_discrete:
+            action_encoded = torch.nn.functional.one_hot(
+                action.long(), num_classes=action_dim
+            ).float()
+        else:
+            action_encoded = action
+
+        # Full forward pass with gradients
+        recon, vq_loss = model.vision(state_tensor)
+        z_e = model.vision.encode(state_tensor, is_image_based=is_image_based)
+
+        if is_image_based:
+            z_t = z_e.mean(dim=(2, 3))
+        else:
+            z_t = z_e
+
+        # Vision reconstruction loss
+        recon_loss = torch.nn.functional.mse_loss(recon, state_tensor)
+
+        # Get memory prediction (with gradients)
+        h_t = model.memory.update_memory(z_t, action_encoded)
+        memory_pred = model.memory.predict_next(z_t, action_encoded, h_t)
+
+        # Target: encoded next state (no gradients needed for target)
+        with torch.no_grad():
+            vision_encoded_next = model.vision.encode(
+                new_state_tensor, is_image_based=is_image_based
+            )
+            if is_image_based:
+                vision_encoded_next = vision_encoded_next.mean(dim=(2, 3))
+
+        memory_loss = torch.nn.functional.mse_loss(memory_pred, vision_encoded_next)
+
+        step_loss = recon_loss + vq_loss.mean() + memory_loss
+
+        # Reward prediction loss
+        if model.reward_predictor is not None:
+            predicted_reward = model.reward_predictor(z_t, h_t, reward).squeeze(-1)
+            reward_loss = loss_func(predicted_reward, reward).mean()
+            step_loss = step_loss + reward_loss
+            reward_losses.append(reward_loss.item())
+
+        total_loss = total_loss + step_loss
+        recon_losses.append(recon_loss.item())
+        vq_losses.append(vq_loss.mean().item())
+        memory_losses.append(memory_loss.item())
+
+    # Average loss over sampled steps
+    total_loss = total_loss / num_samples
 
     optimizer.zero_grad(set_to_none=True)
     total_loss.backward()
     torch.nn.utils.clip_grad_norm_(model.vision.parameters(), max_norm=1.0)
     torch.nn.utils.clip_grad_norm_(model.memory.parameters(), max_norm=1.0)
+    if model.reward_predictor is not None:
+        torch.nn.utils.clip_grad_norm_(model.reward_predictor.parameters(), max_norm=1.0)
     optimizer.step()
 
-    # Recomputing the graph for a separate backward.
-    h_t_det = output_dict["memory_hidden"].detach()
-    z_e = model.vision.encode(state_tensor, is_image_based=is_image_based)
-    if is_image_based:
-        z_t = z_e.mean(dim=(2, 3))
-    else:
-        z_t = z_e
-    z_t_det = z_t.detach()
+    return {
+        "total_loss": total_loss.item(),
+        "recon_loss": np.mean(recon_losses),
+        "vq_loss": np.mean(vq_losses),
+        "memory_loss": np.mean(memory_losses),
+        "reward_loss": np.mean(reward_losses) if reward_losses else 0.0,
+    }
 
-    action_for_policy, log_probs_det, value_det, entropy_det = model.controller(z_t_det, h_t_det)
-    # log_probs_det (B,1); value_det (B,1)
-    log_probs = log_probs_det.view(-1)
-    value = value_det.view(-1)
-    entropy = entropy_det.view(-1)
 
-    """discounted_return = gamma * discounted_return + step_reward_t
-    discounted_return[dones] = 0.0
-    advantage = (discounted_return - value).detach()"""
+def update_policy_ppo(
+    model: WorldModel,
+    rollout_buffer: RolloutBuffer,
+    returns: torch.Tensor,
+    advantages: torch.Tensor,
+    policy_optimizer: torch.optim.Optimizer,
+    num_epochs: int = 4,
+    batch_size: int = 64,
+    clip_epsilon: float = 0.2,
+    entropy_coeff: float = 0.01,
+    value_coeff: float = 0.5,
+):
+    """
+    Update policy using PPO with clipped objective.
+    """
+    # Normalize advantages
+    adv_mean = advantages.mean()
+    adv_std = advantages.std() + 1e-8
+    advantages = (advantages - adv_mean) / adv_std
 
-    td_target = step_reward_t + gamma * value.detach() * (~dones)  # shape (B,)
-    advantage = td_target - value
-    # Normalization across batch for stability.
-    adv_mean = advantage.mean()
-    adv_std = advantage.std(unbiased=False) + 1e-8
-    advantage = (advantage - adv_mean) / adv_std
+    policy_losses = []
+    value_losses = []
+    entropy_losses = []
+    clip_fractions = []
 
-    policy_loss = -(log_probs * advantage.detach()).mean()
-    value_loss = loss_instance(value, td_target.detach())
-    # print("memory_loss", memory_loss.detach().item())
-    # print("policy_loss", policy_loss.detach().item())
-    # print("total_loss", total_loss.detach().item())
+    for _ in range(num_epochs):
+        for batch in rollout_buffer.get_batches(batch_size, returns, advantages):
+            z_ts = batch["z_ts"]
+            h_ts = batch["h_ts"]
+            old_log_probs = batch["old_log_probs"]
+            old_values = batch["old_values"]
+            batch_returns = batch["returns"]
+            batch_advantages = batch["advantages"]
+            actions = batch["actions"]
 
-    entropy_coeff = 0.01  # TODO: To be determined in [0.0, 0.1].
-    entropy_loss = -entropy_coeff * entropy.mean()
-    policy_loss = policy_loss + entropy_loss
-
-    policy_optimizer.zero_grad(set_to_none=True)
-    (policy_loss + value_loss).backward()
-    torch.nn.utils.clip_grad_norm_(model.controller.parameters(), max_norm=0.5)
-    policy_optimizer.step()
-
-    if tensorboard_writer is not None:
-        tensorboard_writer.add_scalar("train/loss", total_loss.mean().item(), iter_num)
-        tensorboard_writer.add_scalar("train/policy_loss", policy_loss.item(), iter_num)
-        tensorboard_writer.add_scalar("train/value_loss", value_loss.item(), iter_num)
-        # Component-specific losses for training observability
-        tensorboard_writer.add_scalar(
-            "train/recon_loss", output_dict["recon_loss"].mean().item(), iter_num
-        )
-        tensorboard_writer.add_scalar(
-            "train/vq_loss", output_dict["vq_loss"].mean().item(), iter_num
-        )
-        tensorboard_writer.add_scalar("train/memory_loss", memory_loss.item(), iter_num)
-        tensorboard_writer.add_scalar("train/entropy_loss", entropy_loss.item(), iter_num)
-        if reward_prediction_loss is not None:
-            tensorboard_writer.add_scalar(
-                "train/reward_loss", reward_prediction_loss.item(), iter_num
+            # Evaluate actions using the controller's evaluate_actions method
+            new_log_probs, new_values, entropy = model.controller.evaluate_actions(
+                z_ts, h_ts, actions
             )
-        for name, param in model.named_parameters():
-            if param.grad is not None:
-                tensorboard_writer.add_scalar(
-                    f"gradients/{name}", param.grad.norm().item(), iter_num
-                )
 
-    return cumulated_reward, total_loss.detach(), new_state, dones
+            # PPO clipped objective
+            ratio = torch.exp(new_log_probs - old_log_probs)
+            surr1 = ratio * batch_advantages
+            surr2 = torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * batch_advantages
+            policy_loss = -torch.min(surr1, surr2).mean()
+
+            # Value loss (clipped)
+            value_pred_clipped = old_values + torch.clamp(
+                new_values - old_values, -clip_epsilon, clip_epsilon
+            )
+            value_loss1 = (new_values - batch_returns) ** 2
+            value_loss2 = (value_pred_clipped - batch_returns) ** 2
+            value_loss = 0.5 * torch.max(value_loss1, value_loss2).mean()
+
+            # Entropy bonus
+            entropy_loss = -entropy_coeff * entropy.mean()
+
+            # Total loss
+            loss = policy_loss + value_coeff * value_loss + entropy_loss
+
+            policy_optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.controller.parameters(), max_norm=0.5)
+            policy_optimizer.step()
+
+            # Track metrics
+            policy_losses.append(policy_loss.item())
+            value_losses.append(value_loss.item())
+            entropy_losses.append(entropy_loss.item())
+
+            # Clip fraction
+            clip_fraction = ((ratio - 1).abs() > clip_epsilon).float().mean().item()
+            clip_fractions.append(clip_fraction)
+
+    return {
+        "policy_loss": np.mean(policy_losses),
+        "value_loss": np.mean(value_losses),
+        "entropy_loss": np.mean(entropy_losses),
+        "clip_fraction": np.mean(clip_fractions),
+    }
 
 
-# TODO: Remove render_env arg when rendering of the first env is not done through cv2 anymore.
 def train(
     model: WorldModel,
     envs,
@@ -196,79 +417,179 @@ def train(
     loss_func: callable = MSELoss,
     save_path="./",
     render_mode: str = "",
+    # PPO hyperparameters
+    rollout_steps: int = 128,
+    num_epochs: int = 4,
+    batch_size: int = 64,
+    gamma: float = 0.99,
+    gae_lambda: float = 0.95,
+    clip_epsilon: float = 0.2,
+    entropy_coeff: float = 0.01,
 ):
+    """
+    PPO-style training loop with experience buffer and multiple update epochs.
+    """
     world_params = list(model.vision.parameters()) + list(model.memory.parameters())
     if model.reward_predictor is not None:
         world_params += list(model.reward_predictor.parameters())
     policy_params = list(model.controller.parameters())
 
     optimizer = torch.optim.AdamW(world_params, lr=learning_rate)
-    policy_optimizer = torch.optim.AdamW(policy_params, lr=learning_rate)
-    loss_func = loss_func()  # Add potential args here.
+    policy_optimizer = torch.optim.AdamW(
+        policy_params, lr=learning_rate * 3
+    )  # Often higher LR for policy
+    loss_func_instance = loss_func()
+
     is_image_based = len(envs.single_observation_space.shape) == 3
     action_space = envs.single_action_space
 
     writer = HyperSummaryWriter() if use_tensorboard else None
 
-    cumulated_reward = torch.zeros(
-        envs.num_envs, device=device, dtype=torch.float32
-    )  # , dtype=torch.get_default_dtype()
+    # Initialize rollout buffer
+    rollout_buffer = RolloutBuffer(rollout_steps, envs.num_envs, device)
 
-    best_loss = torch.inf
-    last_save = model.iter_num
+    cumulated_reward = torch.zeros(envs.num_envs, device=device, dtype=torch.float32)
+    episode_rewards = torch.zeros(envs.num_envs, device=device, dtype=torch.float32)
+    episode_lengths = torch.zeros(envs.num_envs, device=device, dtype=torch.float32)
+
+    best_avg_reward = -float("inf")
     nb_experiments = 0
     state, info = envs.reset()
-    local_iter_num = torch.zeros(envs.num_envs)
-    total_episode_loss = torch.zeros(envs.num_envs)
 
-    # For the reinforce-style loss.
-    discounted_return = torch.zeros(envs.num_envs, device=device)
-    gamma = 0.99
+    # Store states for world model update
+    collected_states = []
+    collected_new_states = []
+    collected_actions = []
+    collected_rewards = []
+
+    logger.info(f"Starting PPO training with {envs.num_envs} parallel environments")
+    logger.info(f"Rollout steps: {rollout_steps}, Epochs: {num_epochs}, Batch size: {batch_size}")
 
     while nb_experiments < max_iter:
-        cumulated_reward, loss, state, dones = step(
+        # === COLLECT ROLLOUT ===
+        rollout_buffer.reset()
+        collected_states.clear()
+        collected_new_states.clear()
+        collected_actions.clear()
+        collected_rewards.clear()
+
+        for _ in range(rollout_steps):
+            # Collect one step
+            step_data = collect_rollout_step(
+                model, state, envs, device, is_image_based, action_space, cumulated_reward
+            )
+
+            # Store in buffer
+            rollout_buffer.add(
+                state=step_data["state"],
+                action=step_data["action"],
+                reward=step_data["reward"],
+                done=step_data["done"],
+                log_prob=step_data["log_prob"],
+                value=step_data["value"],
+                z_t=step_data["z_t"],
+                h_t=step_data["h_t"],
+            )
+
+            # Store for world model update
+            collected_states.append(step_data["state"])
+            collected_new_states.append(step_data["new_state"])
+            collected_actions.append(step_data["action"])
+            collected_rewards.append(step_data["reward"])
+
+            # Update state
+            state = step_data["new_state"]
+            dones = step_data["done"]
+
+            # Track episode stats
+            episode_rewards += step_data["reward"]
+            episode_lengths += 1
+            cumulated_reward += step_data["reward"]
+
+            if render_mode == "human":
+                render_first_env(envs)
+
+            # Handle episode ends
+            finished_envs = torch.where(dones)[0]
+            for env_id in finished_envs:
+                print(
+                    f"Experiment {model.nb_experiments + 1} | "
+                    f"Length: {int(episode_lengths[env_id])} | "
+                    f"Reward: {episode_rewards[env_id]:.1f}"
+                )
+                model.nb_experiments += 1
+                nb_experiments += 1
+                episode_rewards[env_id] = 0
+                episode_lengths[env_id] = 0
+                cumulated_reward[env_id] = 0
+                model.reset_env_memory(env_id)
+
+        # === COMPUTE ADVANTAGES ===
+        with torch.no_grad():
+            state_tensor = state_transform(state, is_image_based=is_image_based, device=device)
+            output_dict = model(
+                state_tensor,
+                action_space=action_space,
+                is_image_based=is_image_based,
+                return_losses=True,
+                last_reward=cumulated_reward,
+            )
+            last_value = output_dict["value"].squeeze(-1)
+
+        returns, advantages = rollout_buffer.compute_returns_and_advantages(
+            last_value, gamma=gamma, gae_lambda=gae_lambda
+        )
+
+        # === UPDATE WORLD MODEL ===
+        world_metrics = update_world_model(
             model,
-            state,
-            envs,
+            collected_states,
+            collected_new_states,
+            collected_rewards,
+            collected_actions,
             optimizer,
-            policy_optimizer,
             device,
             is_image_based,
             action_space,
-            cumulated_reward,
-            discounted_return,
-            gamma,
-            iter_num=model.iter_num,
-            tensorboard_writer=writer,
-            loss_instance=loss_func,
+            loss_func_instance,
         )
 
-        total_episode_loss += loss
+        # === UPDATE POLICY (PPO) ===
+        policy_metrics = update_policy_ppo(
+            model,
+            rollout_buffer,
+            returns,
+            advantages,
+            policy_optimizer,
+            num_epochs=num_epochs,
+            batch_size=batch_size,
+            clip_epsilon=clip_epsilon,
+            entropy_coeff=entropy_coeff,
+        )
 
-        if render_mode == "human":
-            render_first_env(envs)
+        model.iter_num += rollout_steps * envs.num_envs
 
-        model.iter_num += envs.num_envs
-        local_iter_num += 1
+        # === LOGGING ===
+        if writer is not None:
+            writer.add_scalar("train/world_loss", world_metrics["total_loss"], model.iter_num)
+            writer.add_scalar("train/recon_loss", world_metrics["recon_loss"], model.iter_num)
+            writer.add_scalar("train/vq_loss", world_metrics["vq_loss"], model.iter_num)
+            writer.add_scalar("train/memory_loss", world_metrics["memory_loss"], model.iter_num)
+            writer.add_scalar("train/policy_loss", policy_metrics["policy_loss"], model.iter_num)
+            writer.add_scalar("train/value_loss", policy_metrics["value_loss"], model.iter_num)
+            writer.add_scalar("train/entropy_loss", policy_metrics["entropy_loss"], model.iter_num)
+            writer.add_scalar(
+                "train/clip_fraction", policy_metrics["clip_fraction"], model.iter_num
+            )
 
-        if loss < best_loss and model.iter_num > last_save + 5 * envs.num_envs:
-            best_loss = loss
-            last_save = model.iter_num
+        # === SAVE BEST MODEL ===
+        avg_reward = episode_rewards.mean().item()
+        if avg_reward > best_avg_reward and model.iter_num > 1000:
+            best_avg_reward = avg_reward
             model.save(
                 f"{save_path}{envs.spec.id}_{datetime.now().isoformat(timespec='minutes')}.pt",
                 envs.single_observation_space,
                 envs.single_action_space,
             )
 
-        # logger.info(f"Experiment {experiment_index}\nIteration {local_iter_num + 1}, Mean Loss: {total_episode_loss/(local_iter_num + 1):.4f}")
-        cumulated_reward[dones] = 0
-        finished_envs = torch.where(dones)[0]
-        for env_id in finished_envs:
-            print(
-                f"Experiment {model.nb_experiments + 1}\nEnded at iteration {local_iter_num[env_id]}, Mean Loss: {total_episode_loss[env_id] / local_iter_num[env_id]:.4f}"
-            )
-            model.nb_experiments += 1
-            local_iter_num[env_id] = 0
-            total_episode_loss[env_id] = 0
-            nb_experiments += 1
-            model.reset_env_memory(env_id)
+    logger.info(f"Training complete. Total experiments: {nb_experiments}")

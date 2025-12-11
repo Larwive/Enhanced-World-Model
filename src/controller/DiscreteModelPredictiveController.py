@@ -5,7 +5,6 @@ from controller import ControllerModel
 
 
 class DiscreteModelPredictiveController(ControllerModel):
-
     def __init__(self, z_dim, h_dim, action_dim):
         super().__init__()
 
@@ -20,22 +19,30 @@ class DiscreteModelPredictiveController(ControllerModel):
     def forward(self, z_t, h_t):
         # z_t: (B, z_dim) and h_t: (B, h_dim)
         x = torch.cat([z_t, h_t], dim=-1)
-        logits = self.policy(x)               # (B, action_dim)
+        logits = self.policy(x)  # (B, action_dim)
         dist = Categorical(logits=logits)
 
-        action = dist.sample()                # (B,)
+        action = dist.sample()  # (B,)
         logp = dist.log_prob(action).unsqueeze(-1)  # (B, 1)
-        value = self.value(h_t)               # (B, 1)
+        value = self.value(h_t)  # (B, 1)
         entropy = dist.entropy().unsqueeze(-1)
 
         return action, logp, value, entropy
 
+    def evaluate_actions(self, z_t, h_t, actions):
+        """Evaluate log probability and entropy for given actions."""
+        x = torch.cat([z_t, h_t], dim=-1)
+        logits = self.policy(x)
+        dist = Categorical(logits=logits)
+
+        log_prob = dist.log_prob(actions.long())
+        value = self.value(h_t).squeeze(-1)
+        entropy = dist.entropy()
+
+        return log_prob, value, entropy
+
     def export_hyperparams(self):
-        return {
-            "z_dim": self.z_dim,
-            "h_dim": self.h_dim,
-            "action_dim": self.action_dim
-        }
+        return {"z_dim": self.z_dim, "h_dim": self.h_dim, "action_dim": self.action_dim}
 
     def save_state(self):
         return self.state_dict()

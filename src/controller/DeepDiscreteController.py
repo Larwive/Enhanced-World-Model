@@ -100,6 +100,20 @@ class DeepDiscreteController(ControllerModel):
 
         return action, log_prob, value, entropy
 
+    def evaluate_actions(self, z_t: torch.Tensor, h_t: torch.Tensor, actions: torch.Tensor):
+        """Evaluate log probability and entropy for given actions."""
+        x = torch.cat([z_t, h_t], dim=-1)
+        features = self.shared_features(x)
+
+        logits = self.actor(features)
+        dist = Categorical(logits=logits)
+
+        log_prob = dist.log_prob(actions.long())
+        value = self.critic(features).squeeze(-1)
+        entropy = dist.entropy()
+
+        return log_prob, value, entropy
+
     def export_hyperparams(self):
         return {
             "z_dim": self.z_dim,
