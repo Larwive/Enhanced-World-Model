@@ -1,7 +1,8 @@
 import abc
-from typing import Any, Tuple
-from torch.nn import Module
+from typing import Any
+
 import torch
+from torch.nn import Module
 
 
 def load_model(path, available_classes: dict):
@@ -18,18 +19,17 @@ def load_model(path, available_classes: dict):
     try:
         model_class = available_classes[class_name]
     except Exception as e:
-        print("Class {} not found in provided dict.".format(class_name))
+        print(f"Class {class_name} not found in provided dict.")
         raise e
     return model_class.load(path)
 
 
 class Model(Module):
-
     def __init__(self) -> None:
         super().__init__()
 
     @abc.abstractmethod
-    def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+    def forward(self, input: torch.Tensor, **kwargs) -> tuple[torch.Tensor, ...]:
         """
         Forward pass. Must be implemented in subclasses.
 
@@ -51,10 +51,13 @@ class Model(Module):
 
         :param path: Path to save the model checkpoint (.pt file)
         """
-        torch.save({
-            "state_dict": self.state_dict(),
-            "hyperparam": self.export_hyperparams(),
-        }, path)
+        torch.save(
+            {
+                "state_dict": self.state_dict(),
+                "hyperparam": self.export_hyperparams(),
+            },
+            path,
+        )
 
     @abc.abstractmethod
     def load(cls, path: str, **kwargs: Any) -> "Model":
