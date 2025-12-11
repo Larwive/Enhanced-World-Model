@@ -2,7 +2,7 @@ import importlib
 import pkgutil
 
 
-def discover_modules(package) -> dict | None:
+def discover_modules(package) -> dict:
     """
     Imports all modules in the given package.
 
@@ -14,7 +14,7 @@ def discover_modules(package) -> dict | None:
 
     # Testing if is a package or just a module.
     if not hasattr(package, "__path__"):
-        return
+        return {}
 
     for _, name, _ in pkgutil.iter_modules(package.__path__):
         full_name = f"{package.__name__}.{name}"

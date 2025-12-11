@@ -28,7 +28,7 @@ class ControllerModel(Model):
         REGISTRY[cls.__name__] = cls
 
     @abstractmethod
-    def forward(self, z_t: torch.Tensor, h_t: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def forward(self, z_t: torch.Tensor, h_t: torch.Tensor, **kwargs) -> tuple[torch.Tensor, ...]:
         """
         Compute action and policy information.
 
