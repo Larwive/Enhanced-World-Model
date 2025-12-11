@@ -2,7 +2,7 @@ import importlib
 import pkgutil
 
 
-def discover_modules(package) -> dict:
+def discover_modules(package) -> dict | None:
     """
     Imports all modules in the given package.
 
