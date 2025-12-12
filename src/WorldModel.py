@@ -45,18 +45,19 @@ def describe_action_space(space):
         return {"type": "Unknown", "details": str(space)}
 
 
-def squash_to_action_space(raw_action, action_space):
+def squash_to_action_space(action, action_space):
     """
-    Mappe une action non bornée dans les bornes de action_space (gym.spaces.Box)
+    Scale action from [-1, 1] to action_space bounds.
+    Assumes action is already bounded (e.g., from tanh in controller).
     """
     decrypted_action_space = describe_action_space(action_space)
-    low = torch.as_tensor(
-        decrypted_action_space["low"], dtype=torch.float32, device=raw_action.device
-    )
+    low = torch.as_tensor(decrypted_action_space["low"], dtype=torch.float32, device=action.device)
     high = torch.as_tensor(
-        decrypted_action_space["high"], dtype=torch.float32, device=raw_action.device
+        decrypted_action_space["high"], dtype=torch.float32, device=action.device
     )
-    scaled = 0.5 * ((torch.tanh(raw_action) + 1) * (high - low)) + low
+    # Scale from [-1, 1] to [low, high]
+    # action is already in [-1, 1] from tanh in controller
+    scaled = 0.5 * ((action + 1) * (high - low)) + low
     return scaled
 
 
@@ -133,24 +134,26 @@ class WorldModel(Model):
         h_t = self.memory.update_memory(z_t, self.a_prev)
 
         # === CONTROLLER ===
-        action, log_probs, value, _entropy = self.controller(z_t, h_t)
+        action_raw, log_probs, value, _entropy = self.controller(z_t, h_t)
+        action_for_ppo = action_raw  # Store pre-scaled action for PPO
+
         if isinstance(action_space, gym.spaces.Discrete):
             n = action_space.n
-
             device = input.device
-            action = action.to(device)
+            action = action_raw.to(device)
             log_probs = log_probs.to(device)
 
             a_prev_onehot = (
                 torch.nn.functional.one_hot(action.long(), num_classes=n).float().to(device)
             )
             self.a_prev = a_prev_onehot.detach()
-
             z_next_pred = self.memory.predict_next(z_t, self.a_prev, h_t)
         else:
-            action = squash_to_action_space(action, action_space)
-            self.a_prev = action.detach()
-            z_next_pred = self.memory.predict_next(z_t, action, h_t)
+            # For continuous: action_raw is in [-1, 1] from tanh
+            # Scale to environment bounds for stepping
+            action = squash_to_action_space(action_raw, action_space)
+            self.a_prev = action_raw.detach()  # Store unscaled for memory
+            z_next_pred = self.memory.predict_next(z_t, action_raw, h_t)
 
         if not return_losses:
             return action
@@ -167,7 +170,8 @@ class WorldModel(Model):
         outputs = {
             "memory_prediction": z_next_pred,  # (B, latent_dim) - prédiction de z_{t+1}
             "memory_hidden": h_t,  # (B, d_model) - état caché du transformer
-            "action": action,
+            "action": action,  # Scaled action for env.step()
+            "action_for_ppo": action_for_ppo,  # Pre-scaled action for PPO ([-1,1] for continuous)
             "recon_loss": recon_loss,
             "vq_loss": vq_loss,
             "total_loss": total_loss,

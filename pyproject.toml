@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=2.3.1",
     "tensorboard>=2.20.0",
     "gradio>=4.39.0",
+    "psutil>=5.9.0",
     # Platform-specific PyTorch installations
     "torch>=2.9.0; sys_platform == 'darwin'",
     "torchvision>=0.22.1; sys_platform == 'darwin'",

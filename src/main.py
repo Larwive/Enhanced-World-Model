@@ -5,12 +5,13 @@ from datetime import datetime
 import gymnasium as gym
 import torch
 
-import vision
-import memory
 import controller
+import memory
 import reward_predictor
+import vision
 from pretrain import pretrain
 from train import train
+from utils.hardware import compute_optimal_num_envs
 from utils.registry import discover_modules
 from WorldModel import WorldModel
 
@@ -57,8 +58,7 @@ def main():
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--max-epoch", type=int, default=200)
     parser.add_argument("--patience", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--save-path", default="./saved_models/")
     parser.add_argument("--load-path", default="")
@@ -66,7 +66,7 @@ def main():
     parser.add_argument("--render-mode", type=str, default="rgb_array")
     parser.add_argument("--env-batch-number", type=str, default="auto")
     parser.add_argument("--vision", type=str, default="Identity")
-    parser.add_argument("--memory", type=str, default="TemporalTransformer")
+    parser.add_argument("--memory", type=str, default="LSTMMemory")
     parser.add_argument("--controller", type=str, default="DiscreteModelPredictiveController")
     parser.add_argument("--reward-predictor", type=str, default="LinearPredictor")
 
@@ -85,8 +85,15 @@ def main():
 
     env_batch_size = int(args.env_batch_number) if args.env_batch_number.isdigit() else "auto"
     if env_batch_size == "auto":
-        # TODO: Automatically determines the maximum size of the batch.
-        env_batch_size = 2
+        real_render_mode = "rgb_array" if args.render_mode == "human" else args.render_mode
+        # Detect if likely image-based from vision model choice
+        is_likely_image_based = args.vision != "Identity"
+        env_batch_size = compute_optimal_num_envs(
+            env_name=args.env_name,
+            device=device,
+            render_mode=real_render_mode,
+            is_image_based=is_likely_image_based,
+        )
 
     logger.info(f"Running with {env_batch_size} parallel environments.")
 
@@ -142,15 +149,31 @@ def main():
 
         # Configure memory and controller based on environment
         action_space = envs.single_action_space
-        if isinstance(action_space, gym.spaces.Discrete):
+        is_discrete_action = isinstance(action_space, gym.spaces.Discrete)
+        if is_discrete_action:
             action_dim = action_space.n  # action_space.n is actually the number of possible values
         else:  # Box, etc.
             action_dim = action_space.shape[0]
 
-        controller_model = CONTROLLER_REGISTRY.get(args.controller, None)
+        # Auto-select controller if default doesn't match action space type
+        controller_name = args.controller
+        if is_discrete_action and "Continuous" in controller_name:
+            logger.warning(
+                f"Action space is Discrete but controller is {controller_name}. "
+                "Switching to DiscreteModelPredictiveController."
+            )
+            controller_name = "DiscreteModelPredictiveController"
+        elif not is_discrete_action and "Discrete" in controller_name:
+            logger.warning(
+                f"Action space is Continuous (Box) but controller is {controller_name}. "
+                "Switching to ContinuousModelPredictiveController."
+            )
+            controller_name = "ContinuousModelPredictiveController"
+
+        controller_model = CONTROLLER_REGISTRY.get(controller_name, None)
         if controller_model is None:
             raise Exception(
-                f"Controller model {args.controller} is not available.\nAvailable models: {list(CONTROLLER_REGISTRY.keys())}"
+                f"Controller model {controller_name} is not available.\nAvailable models: {list(CONTROLLER_REGISTRY.keys())}"
             )
 
         memory_args = {
@@ -231,7 +254,9 @@ def main():
                 render_mode=args.render_mode,
             )
 
-            save_name = f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
+            save_name = (
+                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
+            )
             world_model.save(
                 save_name,
                 obs_space=obs_space,

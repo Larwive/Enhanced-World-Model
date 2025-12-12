@@ -122,8 +122,15 @@ class RolloutBuffer:
         total_size = self.ptr * self.num_envs
         indices = np.random.permutation(total_size)
 
-        # Stack and flatten
-        actions = torch.stack(self.actions).view(-1)  # (T * num_envs,)
+        # Stack and flatten - handle both discrete (scalar) and continuous (vector) actions
+        stacked_actions = torch.stack(self.actions)  # (T, num_envs) or (T, num_envs, action_dim)
+        if stacked_actions.dim() == 2:
+            # Discrete: (T, num_envs) -> (T * num_envs,)
+            actions = stacked_actions.view(-1)
+        else:
+            # Continuous: (T, num_envs, action_dim) -> (T * num_envs, action_dim)
+            actions = stacked_actions.view(-1, stacked_actions.shape[-1])
+
         log_probs = torch.stack(self.log_probs).view(-1)  # (T * num_envs,)
         values = torch.stack(self.values).view(-1)  # (T * num_envs,)
         z_ts = torch.stack(self.z_ts).view(-1, self.z_ts[0].shape[-1])  # (T * num_envs, z_dim)
@@ -186,13 +193,14 @@ def collect_rollout_step(
             last_reward=cumulated_reward,
         )
 
-    actions = output_dict["action"]
+    actions = output_dict["action"]  # Scaled for env.step()
+    actions_for_ppo = output_dict["action_for_ppo"]  # Pre-scaled for PPO
     log_probs = output_dict["log_probs"].squeeze(-1)  # (num_envs,)
     values = output_dict["value"].squeeze(-1)  # (num_envs,)
     z_t = output_dict["memory_prediction"]  # Latent state
     h_t = output_dict["memory_hidden"]  # Hidden state
 
-    # Step environment
+    # Step environment with scaled actions
     actions_np = actions.cpu().detach().numpy()
     new_state, step_reward, terminated, truncated, info = envs.step(actions_np)
     dones = torch.from_numpy(terminated | truncated).to(device, dtype=torch.bool)
@@ -200,7 +208,8 @@ def collect_rollout_step(
 
     return {
         "state": state,
-        "action": actions,
+        "action": actions_for_ppo,  # Pre-scaled for PPO buffer
+        "action_scaled": actions,  # Scaled for world model update
         "reward": step_reward_t,
         "done": dones,
         "log_prob": log_probs,
@@ -310,7 +319,10 @@ def update_world_model(
 
     optimizer.zero_grad(set_to_none=True)
     total_loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.vision.parameters(), max_norm=1.0)
+    # Only clip gradients if model has parameters
+    vision_params = list(model.vision.parameters())
+    if vision_params:
+        torch.nn.utils.clip_grad_norm_(vision_params, max_norm=1.0)
     torch.nn.utils.clip_grad_norm_(model.memory.parameters(), max_norm=1.0)
     if model.reward_predictor is not None:
         torch.nn.utils.clip_grad_norm_(model.reward_predictor.parameters(), max_norm=1.0)
@@ -416,18 +428,23 @@ def train(
     learning_rate: float = 0.01,
     loss_func: callable = MSELoss,
     save_path="./",
-    render_mode: str = "",
+    render_mode: str = "rgb_array",
     # PPO hyperparameters
     rollout_steps: int = 128,
     num_epochs: int = 4,
-    batch_size: int = 64,
     gamma: float = 0.99,
     gae_lambda: float = 0.95,
     clip_epsilon: float = 0.2,
-    entropy_coeff: float = 0.01,
+    # Exploration annealing
+    entropy_coeff_start: float = 0.01,
+    entropy_coeff_end: float = 0.001,
+    temp_start: float = 1.0,
+    temp_end: float = 0.1,
+    anneal_steps: int = 50000,
 ):
     """
     PPO-style training loop with experience buffer and multiple update epochs.
+    Includes exploration annealing (temperature + entropy) to reduce exploration over time.
     """
     world_params = list(model.vision.parameters()) + list(model.memory.parameters())
     if model.reward_predictor is not None:
@@ -436,7 +453,8 @@ def train(
 
     optimizer = torch.optim.AdamW(world_params, lr=learning_rate)
     policy_optimizer = torch.optim.AdamW(
-        policy_params, lr=learning_rate * 3
+        policy_params,
+        lr=learning_rate * 3,  # Need to fine tune this variable
     )  # Often higher LR for policy
     loss_func_instance = loss_func()
 
@@ -463,9 +481,11 @@ def train(
     collected_rewards = []
 
     logger.info(f"Starting PPO training with {envs.num_envs} parallel environments")
-    logger.info(f"Rollout steps: {rollout_steps}, Epochs: {num_epochs}, Batch size: {batch_size}")
+    logger.info(f"Rollout steps: {rollout_steps}, Epochs: {num_epochs}")
 
+    iteration = 0
     while nb_experiments < max_iter:
+        iteration += 1
         # === COLLECT ROLLOUT ===
         rollout_buffer.reset()
         collected_states.clear()
@@ -473,7 +493,8 @@ def train(
         collected_actions.clear()
         collected_rewards.clear()
 
-        for _ in range(rollout_steps):
+        logger.info(f"Iteration {iteration}: Collecting {rollout_steps} rollout steps...")
+        for _step_idx in range(rollout_steps):
             # Collect one step
             step_data = collect_rollout_step(
                 model, state, envs, device, is_image_based, action_space, cumulated_reward
@@ -554,6 +575,18 @@ def train(
             loss_func_instance,
         )
 
+        # === ANNEAL EXPLORATION ===
+        # Linear annealing from start to end over anneal_steps
+        anneal_progress = min(1.0, model.iter_num / anneal_steps)
+        current_entropy_coeff = (
+            entropy_coeff_start + (entropy_coeff_end - entropy_coeff_start) * anneal_progress
+        )
+        current_temp = temp_start + (temp_end - temp_start) * anneal_progress
+
+        # Set temperature on controller if it supports it
+        if hasattr(model.controller, "set_temperature"):
+            model.controller.set_temperature(current_temp)
+
         # === UPDATE POLICY (PPO) ===
         policy_metrics = update_policy_ppo(
             model,
@@ -562,12 +595,23 @@ def train(
             advantages,
             policy_optimizer,
             num_epochs=num_epochs,
-            batch_size=batch_size,
+            batch_size=rollout_steps * envs.num_envs // 4,
             clip_epsilon=clip_epsilon,
-            entropy_coeff=entropy_coeff,
+            entropy_coeff=current_entropy_coeff,
         )
 
         model.iter_num += rollout_steps * envs.num_envs
+
+        # Log iteration summary
+        logger.info(
+            f"Iteration {iteration} complete | "
+            f"Steps: {model.iter_num} | "
+            f"World Loss: {world_metrics['total_loss']:.4f} | "
+            f"Policy Loss: {policy_metrics['policy_loss']:.4f} | "
+            f"Temp: {current_temp:.3f} | "
+            f"Entropy: {current_entropy_coeff:.4f} | "
+            f"Experiments: {nb_experiments}"
+        )
 
         # === LOGGING ===
         if writer is not None:
@@ -581,6 +625,8 @@ def train(
             writer.add_scalar(
                 "train/clip_fraction", policy_metrics["clip_fraction"], model.iter_num
             )
+            writer.add_scalar("train/temperature", current_temp, model.iter_num)
+            writer.add_scalar("train/entropy_coeff", current_entropy_coeff, model.iter_num)
 
         # === SAVE BEST MODEL ===
         avg_reward = episode_rewards.mean().item()
