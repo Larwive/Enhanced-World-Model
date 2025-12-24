@@ -1,5 +1,6 @@
-from typing import Any, cast
 from pathlib import Path
+from typing import Any, cast
+
 import gymnasium as gym
 import numpy as np
 import torch
