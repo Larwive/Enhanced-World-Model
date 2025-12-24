@@ -1,5 +1,5 @@
 from abc import abstractmethod
-
+from typing import Any
 import torch
 
 from Model import Model
@@ -18,13 +18,18 @@ class RewardPredictorModel(Model):
         h_dim: Dimension of hidden state (from memory)
     """
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls
 
     @abstractmethod
     def forward(
-        self, z_t: torch.Tensor, h_t: torch.Tensor, last_reward: torch.Tensor, **kwargs
+        self,
+        z_t: torch.Tensor,
+        h_t: torch.Tensor,
+        last_reward: torch.Tensor,
+        *args: Any,
+        **kwargs: Any,
     ) -> torch.Tensor:
         """
         Predict next reward from current state.
@@ -36,5 +41,15 @@ class RewardPredictorModel(Model):
 
         Returns:
             predicted_reward: Predicted reward for next timestep, shape (B, 1)
+        """
+        pass
+
+    @abstractmethod
+    def save_state(self) -> dict[str, torch.Tensor]:
+        """
+        Save model state dict to file.
+
+        Args:
+            path: Path to save state dict to
         """
         pass
