@@ -1,5 +1,5 @@
 from abc import abstractmethod
-
+from typing import Any
 import torch
 
 from Model import Model
@@ -19,12 +19,14 @@ class ControllerModel(Model):
         action_dim: Dimension of action space
     """
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls
 
     @abstractmethod
-    def forward(self, z_t: torch.Tensor, h_t: torch.Tensor, **kwargs) -> tuple[torch.Tensor, ...]:
+    def forward(
+        self, z_t: torch.Tensor, h_t: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute action and policy information.
 
