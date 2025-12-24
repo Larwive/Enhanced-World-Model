@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 import logging
 from datetime import datetime
 
@@ -22,7 +25,7 @@ class HyperSummaryWriter(SummaryWriter):
     Add possiblity to store hyperparameters.
     """
 
-    def add_hparams(self, hparam_dict, metric_dict):
+    def add_hparams(self, hparam_dict: dict, metric_dict: dict) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
         if type(hparam_dict) is not dict or type(metric_dict) is not dict:
             raise TypeError("hparam_dict and metric_dict should be dictionary.")
@@ -31,6 +34,7 @@ class HyperSummaryWriter(SummaryWriter):
         logdir = self._get_file_writer().get_logdir()
 
         with SummaryWriter(log_dir=logdir) as w_hp:
+            assert w_hp.file_writer is not None
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
@@ -38,7 +42,7 @@ class HyperSummaryWriter(SummaryWriter):
                 w_hp.add_scalar(k, v)
 
 
-def state_transform(state, is_image_based, device):
+def state_transform(state: np.ndarray, is_image_based: bool, device: torch.device) -> torch.Tensor:
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
         if state.ndim == 3:
@@ -54,21 +58,21 @@ def state_transform(state, is_image_based, device):
 
 
 def step(
-    model,
-    state,
-    envs,
-    optimizer,
-    policy_optimizer,
-    device,
-    is_image_based,
-    action_space,
-    cumulated_reward,
-    discounted_return,
-    gamma,
+    model: WorldModel,
+    state: np.ndarray,
+    envs: Any,
+    optimizer: torch.optim.Optimizer,
+    policy_optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    is_image_based: bool,
+    action_space: Any,
+    cumulated_reward: torch.Tensor,
+    discounted_return: torch.Tensor,
+    gamma: float,
     iter_num: int = 0,
-    tensorboard_writer=None,
-    loss_instance=None,
-):
+    tensorboard_writer: HyperSummaryWriter | None = None,
+    loss_instance: Callable | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, np.ndarray, torch.Tensor]:
     if loss_instance is None:
         loss_instance = MSELoss()  # Same as below.
 
@@ -185,15 +189,15 @@ def step(
 # TODO: Remove render_env arg when rendering of the first env is not done through cv2 anymore.
 def train(
     model: WorldModel,
-    envs,
-    max_iter=10000,
+    envs: Any,
+    max_iter: int = 10000,
     device: torch.device = torch.device("cpu"),
     use_tensorboard: bool = True,
     learning_rate: float = 0.01,
-    loss_func: callable = MSELoss,
-    save_path="./",
+    loss_func: Callable = MSELoss,
+    save_path: Path = Path("./"),
     render_mode: str = "",
-):
+) -> None:
     world_params = list(model.vision.parameters()) + list(model.memory.parameters())
     if model.reward_predictor is not None:
         world_params += list(model.reward_predictor.parameters())
@@ -252,7 +256,9 @@ def train(
             best_loss = loss
             last_save = model.iter_num
             model.save(
-                f"{save_path}{envs.spec.id}_{datetime.now().isoformat(timespec='minutes')}.pt",
+                Path(
+                    f"{save_path}{envs.spec.id}_{datetime.now().isoformat(timespec='minutes')}.pt"
+                ),
                 envs.single_observation_space,
                 envs.single_action_space,
             )
