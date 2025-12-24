@@ -1,11 +1,13 @@
+import numpy as np
+from typing import Any
 import pygame
 
 from WorldModel import describe_action_space
 
 
-def register_input(envs):
+def register_input(envs: Any) -> tuple[np.ndarray, bool, bool]:
     restart, quit = False, False
-    a = describe_action_space(envs.single_action_space)["low"]  # Valid default value
+    a: np.ndarray = describe_action_space(envs.single_action_space)["low"]  # Valid default value
 
     match envs.spec.id:
         case "CarRacing-v3":

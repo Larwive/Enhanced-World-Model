@@ -1,3 +1,5 @@
+from typing import Any, cast
+from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
@@ -9,7 +11,7 @@ import vision
 from Model import Model
 
 
-def describe_action_space(space):
+def describe_action_space(space: Any) -> dict:
     if isinstance(space, gym.spaces.Discrete):
         return {"type": "Discrete", "n": space.n, "low": 0, "high": space.n - 1}
 
@@ -45,9 +47,9 @@ def describe_action_space(space):
         return {"type": "Unknown", "details": str(space)}
 
 
-def squash_to_action_space(raw_action, action_space):
+def squash_to_action_space(raw_action: torch.Tensor, action_space: Any) -> torch.Tensor:
     """
-    Mappe une action non bornée dans les bornes de action_space (gym.spaces.Box)
+    Mappe une action non bornée dans les bornes de action_space (gym.spaces.Box).
     """
     decrypted_action_space = describe_action_space(action_space)
     low = torch.as_tensor(
@@ -63,13 +65,13 @@ def squash_to_action_space(raw_action, action_space):
 class WorldModel(Model):
     def __init__(
         self,
-        vision_model,
-        memory_model,
-        controller_model,
-        input_shape,
-        vision_args,
-        memory_args,
-        controller_args,
+        vision_model: vision.VisionModel,
+        memory_model: memory.MemoryModel,
+        controller_model: controller.ControllerModel,
+        input_shape: tuple[int, ...],
+        vision_args: dict,
+        memory_args: dict,
+        controller_args: dict,
     ) -> None:
         super().__init__()
         self.iter_num = 0  # The number of training iterations tied to this model.
@@ -88,17 +90,17 @@ class WorldModel(Model):
             z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args
         )
 
-        self.reward_predictor = None
+        self.reward_predictor: reward_predictor.RewardPredictorModel | None = None
         self.a_prev = None
 
     def forward(
         self,
-        input,
-        action_space,
+        input: torch.Tensor,
+        action_space: Any,
         is_image_based: bool,
         return_losses: bool = False,
-        last_reward=None,
-    ):
+        last_reward: torch.Tensor | None = None,
+    ) -> torch.Tensor | dict:
         """
         Args:
             input: observation actuelle
@@ -135,7 +137,7 @@ class WorldModel(Model):
         # === CONTROLLER ===
         action, log_probs, value, _entropy = self.controller(z_t, h_t)
         if isinstance(action_space, gym.spaces.Discrete):
-            n = action_space.n
+            n: int = int(action_space.n)
 
             device = input.device
             action = action.to(device)
@@ -185,15 +187,27 @@ class WorldModel(Model):
 
         return outputs
 
-    def reset_env_memory(self, env_idx):
+    def reset_env_memory(self, env_idx: int | torch.Tensor) -> None:
         self.memory.reset_env_memory(env_idx)
         if self.a_prev is not None:
             self.a_prev[env_idx] = 0
 
-    def export_hyperparams(self):
-        pass
+    def export_hyperparams(self) -> dict:
+        hyperparams_dict = {
+            "vision_model": self.vision.__class__.__name__,
+            "vision_args": self.vision.export_hyperparams(),
+            "memory_model": self.memory.__class__.__name__,
+            "memory_args": self.memory.export_hyperparams(),
+            "controller_model": self.controller.__class__.__name__,
+            "controller_args": self.controller.export_hyperparams(),
+        }
 
-    def save(self, path, obs_space, action_space):
+        if self.reward_predictor is not None:
+            hyperparams_dict["reward_predictor_model"] = self.reward_predictor.__class__.__name__
+            hyperparams_dict["reward_predictor_args"] = self.reward_predictor.export_hyperparams()
+        return hyperparams_dict
+
+    def save(self, path: Path, obs_space: Any, action_space: Any) -> None:
         saving_dict = {
             "iter_num": self.iter_num,
             "nb_experiments": self.nb_experiments,
@@ -216,13 +230,13 @@ class WorldModel(Model):
             saving_dict["reward_predictor_dict"] = self.reward_predictor.save_state()
         torch.save(saving_dict, path)
 
-    def load(self, path, obs_space, action_space):
+    def load(self, path: Path, obs_space: Any, action_space: Any) -> None:
         # TODO: Check input/output shape consistencies between components before loading the weights ?
         saved_dict = torch.load(path, weights_only=False)
 
         assert (
             obs_space == saved_dict["obs_space"] and action_space == saved_dict["action_space"]
-        ), "Obeservation space and/or action space of the saved model do not match those of the current environment."
+        ), "Observation space and/or action space of the saved model do not match those of the current environment."
         self.iter_num = saved_dict["iter_num"]
         self.nb_experiments = saved_dict["nb_experiments"]
 
@@ -238,21 +252,25 @@ class WorldModel(Model):
         self.controller.load(saved_dict["controller_dict"])
 
         if "reward_predictor_dict" in saved_dict:
-            self.reward_predictor = getattr(reward_predictor, saved_dict["reward_predictor_model"])(
-                **saved_dict["reward_predictor_args"]
+            rp_cls: type[reward_predictor.RewardPredictorModel] = getattr(
+                reward_predictor,
+                saved_dict["reward_predictor_model"],
             )
+            self.reward_predictor = rp_cls(**saved_dict["reward_predictor_args"])
             self.reward_predictor.load(saved_dict["reward_predictor_dict"])
 
-    def set_reward_predictor(self, reward_predictor_class: Model, **kwargs):
-        self.reward_predictor = reward_predictor_class(
-            z_dim=self.vision.embed_dim,
-            h_dim=self.memory_d_model,
-            action_dim=self.action_dim,
-            **kwargs,
-        )
+    def set_reward_predictor(
+        self,
+        reward_predictor_class: type[reward_predictor.RewardPredictorModel],
+        **kwargs: dict[str, Any],
+    ) -> None:
+        kwargs["z_dim"] = self.vision.embed_dim
+        kwargs["h_dim"] = self.memory_d_model
+        kwargs["action_dim"] = self.action_dim
+        self.reward_predictor = reward_predictor_class(**kwargs)
 
 
-def render_first_env(envs, title=""):
+def render_first_env(envs: Any, title: str = "") -> None:
     import cv2
 
     frames = envs.render()
