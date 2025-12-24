@@ -1,5 +1,5 @@
 from abc import abstractmethod
-
+from typing import Any
 import torch
 
 from Model import Model
@@ -18,13 +18,13 @@ class MemoryModel(Model):
         output_dim: Dimension of hidden state (d_model)
     """
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls
 
     @abstractmethod
     def forward(
-        self, z: torch.Tensor, h_prev: torch.Tensor, **kwargs
+        self, z_t: torch.Tensor, a_prev: torch.Tensor, *args: Any, **kwargs: Any
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Full forward pass: update memory and predict next state.
@@ -41,7 +41,7 @@ class MemoryModel(Model):
         pass
 
     @abstractmethod
-    def update(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+    def update(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         """
         Update internal memory with new observation.
 
@@ -55,7 +55,7 @@ class MemoryModel(Model):
         pass
 
     @abstractmethod
-    def predict(self, x: torch.Tensor, h: torch.Tensor, **kwargs) -> torch.Tensor:
+    def predict(self, x: torch.Tensor, h: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         """
         Predict next latent state.
 

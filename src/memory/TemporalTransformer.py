@@ -1,10 +1,19 @@
+from typing import Any, cast
 import torch
 
 from memory import MemoryModel
 
 
 class TemporalTransformer(MemoryModel):
-    def __init__(self, latent_dim=4, action_dim=3, d_model=128, nhead=8, num_layers=4, max_len=32):
+    def __init__(
+        self,
+        latent_dim: int = 4,
+        action_dim: int = 3,
+        d_model: int = 128,
+        nhead: int = 8,
+        num_layers: int = 4,
+        max_len: int = 32,
+    ) -> None:
         super().__init__()
 
         assert d_model % nhead == 0
@@ -31,7 +40,7 @@ class TemporalTransformer(MemoryModel):
         self.seq_buffer = None
         self.seq_lengths = None
 
-    def update_memory(self, z_t, a_prev):
+    def update_memory(self, z_t: torch.Tensor, a_prev: torch.Tensor) -> torch.Tensor:
         """
         z_t:   (B, latent_dim)
         a_prev:(B, action_dim)
@@ -40,9 +49,10 @@ class TemporalTransformer(MemoryModel):
         B = z_t.size(0)
         device = z_t.device
 
-        if self.seq_buffer is None:
+        if self.seq_buffer is None:  # Second part is for type checker.
             self.seq_buffer = torch.zeros(B, self.max_len, self.d_model, device=device)
             self.seq_lengths = torch.zeros(B, dtype=torch.long, device=device)
+        assert self.seq_buffer is not None and self.seq_lengths is not None
 
         x = torch.cat([z_t, a_prev], dim=-1)
         x = self.memory_input_proj(x).unsqueeze(1)
@@ -65,9 +75,9 @@ class TemporalTransformer(MemoryModel):
 
         return h_t
 
-    def predict_next(self, z_t, a_t, h_t):
+    def predict_next(self, z_t: torch.Tensor, a_t: torch.Tensor, h_t: torch.Tensor) -> torch.Tensor:
         """
-        Prédit z_{t+1} à partir de (z_t, a_t, h_t)
+        Predicts z_{t+1} from (z_t, a_t, h_t)
         """
 
         x = torch.cat([z_t, a_t], dim=-1)  # (B, latent+action)
@@ -78,7 +88,9 @@ class TemporalTransformer(MemoryModel):
         z_next = self.output_proj(x)  # (B, latent_dim)
         return z_next
 
-    def forward(self, z_t, a_prev, a_t):
+    def forward(
+        self, z_t: torch.Tensor, a_prev: torch.Tensor, a_t: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Full step:
           h_t = update_memory(z_t, a_prev)
@@ -89,12 +101,13 @@ class TemporalTransformer(MemoryModel):
         z_next_pred = self.predict_next(z_t, a_t, h_t)
         return z_next_pred, h_t
 
-    def reset_env_memory(self, env_idx):
+    def reset_env_memory(self, env_idx: int | torch.Tensor) -> None:
         env_idx = int(env_idx)
+        assert self.seq_buffer is not None and self.seq_lengths is not None
         self.seq_buffer[env_idx].zero_()
         self.seq_lengths[env_idx] = 0
 
-    def export_hyperparams(self):
+    def export_hyperparams(self) -> dict[str, int]:
         return {
             "latent_dim": self.latent_dim,
             "action_dim": self.action_dim,
@@ -104,8 +117,8 @@ class TemporalTransformer(MemoryModel):
             "max_len": self.max_len,
         }
 
-    def save_state(self):
-        return self.state_dict()
+    def save_state(self) -> dict[str, torch.Tensor]:
+        return cast(dict[str, Any], self.state_dict())
 
-    def load(self, state_dict):
+    def load(self, state_dict: dict[str, torch.Tensor]) -> None:
         self.load_state_dict(state_dict)
