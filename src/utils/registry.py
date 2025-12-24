@@ -1,8 +1,12 @@
+from types import ModuleType
+
 import importlib
 import pkgutil
 
+from Model import Model
 
-def discover_modules(package) -> dict:
+
+def discover_modules(package: str | ModuleType) -> dict[str, type[Model]]:
     """
     Imports all modules in the given package.
 
@@ -19,5 +23,5 @@ def discover_modules(package) -> dict:
     for _, name, _ in pkgutil.iter_modules(package.__path__):
         full_name = f"{package.__name__}.{name}"
         importlib.import_module(full_name)
-
+    assert isinstance(package.REGISTRY, dict)
     return package.REGISTRY
