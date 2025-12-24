@@ -121,6 +121,7 @@ class JEPA(VisionModel):
         vicreg_sim_weight: float = 25.0,
         vicreg_var_weight: float = 25.0,
         vicreg_cov_weight: float = 1.0,
+        **_kwargs: Any,  # Ignore extra args like output_dim (used by VQ_VAE)
     ) -> None:
         """
         Initialize JEPA vision model.
@@ -214,28 +215,35 @@ class JEPA(VisionModel):
         z_target_flat = z_target.mean(dim=(2, 3))
 
         batch_size, embed_dim = z_pred_flat.shape
+        device = z_pred_flat.device
 
         # === Invariance loss (similarity) ===
         sim_loss = F.mse_loss(z_pred_flat, z_target_flat)
 
-        # === Variance loss (prevent collapse) ===
-        # Ensure variance of each embedding dimension is above threshold
-        std_pred = torch.sqrt(z_pred_flat.var(dim=0) + 1e-4)
-        std_target = torch.sqrt(z_target_flat.var(dim=0) + 1e-4)
-        var_loss = torch.mean(F.relu(1 - std_pred)) + torch.mean(F.relu(1 - std_target))
+        # Variance and covariance losses require batch_size > 1
+        if batch_size > 1:
+            # === Variance loss (prevent collapse) ===
+            # Ensure variance of each embedding dimension is above threshold
+            std_pred = torch.sqrt(z_pred_flat.var(dim=0) + 1e-4)
+            std_target = torch.sqrt(z_target_flat.var(dim=0) + 1e-4)
+            var_loss = torch.mean(F.relu(1 - std_pred)) + torch.mean(F.relu(1 - std_target))
 
-        # === Covariance loss (decorrelate dimensions) ===
-        z_pred_centered = z_pred_flat - z_pred_flat.mean(dim=0)
-        z_target_centered = z_target_flat - z_target_flat.mean(dim=0)
+            # === Covariance loss (decorrelate dimensions) ===
+            z_pred_centered = z_pred_flat - z_pred_flat.mean(dim=0)
+            z_target_centered = z_target_flat - z_target_flat.mean(dim=0)
 
-        cov_pred = (z_pred_centered.T @ z_pred_centered) / (batch_size - 1)
-        cov_target = (z_target_centered.T @ z_target_centered) / (batch_size - 1)
+            cov_pred = (z_pred_centered.T @ z_pred_centered) / (batch_size - 1)
+            cov_target = (z_target_centered.T @ z_target_centered) / (batch_size - 1)
 
-        # Zero out diagonal (we only penalize off-diagonal covariance)
-        cov_pred = cov_pred - torch.diag(torch.diag(cov_pred))
-        cov_target = cov_target - torch.diag(torch.diag(cov_target))
+            # Zero out diagonal (we only penalize off-diagonal covariance)
+            cov_pred = cov_pred - torch.diag(torch.diag(cov_pred))
+            cov_target = cov_target - torch.diag(torch.diag(cov_target))
 
-        cov_loss = (cov_pred.pow(2).sum() + cov_target.pow(2).sum()) / embed_dim
+            cov_loss = (cov_pred.pow(2).sum() + cov_target.pow(2).sum()) / embed_dim
+        else:
+            # Skip variance/covariance for batch_size=1 (undefined)
+            var_loss = torch.tensor(0.0, device=device)
+            cov_loss = torch.tensor(0.0, device=device)
 
         # Combined loss
         loss = (
@@ -246,8 +254,8 @@ class JEPA(VisionModel):
 
         metrics = {
             "sim_loss": sim_loss.item(),
-            "var_loss": var_loss.item(),
-            "cov_loss": cov_loss.item(),
+            "var_loss": var_loss.item() if batch_size > 1 else 0.0,
+            "cov_loss": cov_loss.item() if batch_size > 1 else 0.0,
         }
 
         return loss, metrics

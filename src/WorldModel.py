@@ -159,10 +159,15 @@ class WorldModel(Model):
             return action
 
         # === LOSSES ===
-        # Vision reconstruction loss
-        recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(
-            dim=tuple(range(1, recon.dim()))
-        )
+        # Vision reconstruction loss (only for reconstruction-based models like VQ_VAE)
+        # Non-reconstruction models (JEPA, ContrastiveEncoder) return latent predictions
+        if recon.shape == input.shape:
+            recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(
+                dim=tuple(range(1, recon.dim()))
+            )
+        else:
+            # No reconstruction loss for non-reconstruction vision models
+            recon_loss = torch.zeros(input.shape[0], device=input.device)
 
         # Memory prediction loss (si z_next_actual est fourni)
         total_loss = recon_loss.mean() + vq_loss.mean()

@@ -63,6 +63,7 @@ class ContrastiveEncoder(VisionModel):
         stride: int = 2,
         temperature: float = 0.1,
         augment_strength: float = 0.5,
+        **_kwargs: Any,  # Ignore extra args like output_dim (used by VQ_VAE)
     ) -> None:
         """
         Initialize Contrastive Encoder.
