@@ -1,12 +1,13 @@
+import logging
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-import logging
-from datetime import datetime
 
 import numpy as np
 import torch
 from torch.nn import MSELoss
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard.summary import hparams
 
@@ -193,7 +194,7 @@ def train(
     max_iter: int = 10000,
     device: torch.device = torch.device("cpu"),
     use_tensorboard: bool = True,
-    learning_rate: float = 0.01,
+    learning_rate: float = 1e-3,
     loss_func: Callable = MSELoss,
     save_path: Path = Path("./"),
     render_mode: str = "",
@@ -205,6 +206,14 @@ def train(
 
     optimizer = torch.optim.AdamW(world_params, lr=learning_rate)
     policy_optimizer = torch.optim.AdamW(policy_params, lr=learning_rate)
+    # Cosine scheduler is usually used with: warmup and cosine annealing.
+    # Hes one of the most used scheduler
+    warmup_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=10)
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=190, eta_min=1e-6)
+    scheduler = SequentialLR(
+        optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[10]
+    )
+
     loss_func = loss_func()  # Add potential args here.
     is_image_based = len(envs.single_observation_space.shape) == 3
     action_space = envs.single_action_space
@@ -275,3 +284,4 @@ def train(
             total_episode_loss[env_id] = 0
             nb_experiments += 1
             model.reset_env_memory(env_id)
+        scheduler.step()
