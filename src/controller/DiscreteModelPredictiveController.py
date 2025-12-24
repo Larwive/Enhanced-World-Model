@@ -6,6 +6,8 @@ from controller import ControllerModel
 
 
 class DiscreteModelPredictiveController(ControllerModel):
+    tags = ["discrete", "stochastic"]
+
     def __init__(self, z_dim: int, h_dim: int, action_dim: int):
         super().__init__()
 

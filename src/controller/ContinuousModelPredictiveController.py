@@ -6,6 +6,8 @@ from controller import ControllerModel
 
 
 class ContinuousModelPredictiveController(ControllerModel):
+    tags = ["continuous", "stochastic"]
+
     def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
         super().__init__()
 

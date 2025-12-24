@@ -7,6 +7,8 @@ from controller import ControllerModel
 
 
 class StochasticController(ControllerModel):
+    tags = ["continuous", "stochastic"]
+
     def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
         super().__init__()
 
