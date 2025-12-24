@@ -1,3 +1,4 @@
+from pathlib import Path
 import argparse
 import logging
 from datetime import datetime
@@ -41,7 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ui",
@@ -115,7 +116,10 @@ def main():
             args.env_name, num_envs=env_batch_size, render_mode=real_render_mode
         )  # args.render_mode)
         obs_space = envs.single_observation_space
-        is_image_based = len(obs_space.shape) == 3
+
+        obs_shape = obs_space.shape
+        assert obs_shape is not None
+        is_image_based = len(obs_shape) == 3
 
         vision_model = VISION_REGISTRY.get(args.vision, None)
         if vision_model is None:
@@ -126,7 +130,6 @@ def main():
         if is_image_based:
             logger.info("Detected image-based environment.")
             # (H, W, C) -> (C, H, W)
-            obs_shape = obs_space.shape
             input_shape = (obs_shape[2], obs_shape[0], obs_shape[1])
             vision_args = {"output_dim": input_shape[0], "embed_dim": 64}
             if "image_based" not in vision_model.tags:
@@ -168,6 +171,8 @@ def main():
         }
         controller_args = {"action_dim": action_dim}
         logger.info(f"Vision model: {vision_model}")
+        logger.info(f"Memory model: {memory_model}")
+        logger.info(f"Controller model: {controller_model}")
 
         world_model = WorldModel(
             vision_model=vision_model,
@@ -238,7 +243,9 @@ def main():
                 render_mode=args.render_mode,
             )
 
-            save_name = f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
+            save_name = Path(
+                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
+            )
             world_model.save(
                 save_name,
                 obs_space=obs_space,

@@ -1,3 +1,4 @@
+from typing import Any, cast
 import torch
 from torch.distributions import Normal, TransformedDistribution
 from torch.distributions.transforms import TanhTransform
@@ -8,7 +9,7 @@ from controller import ControllerModel
 class StochasticController(ControllerModel):
     tags = ["continuous", "stochastic"]
 
-    def __init__(self, z_dim, h_dim, action_dim, **_kwargs):
+    def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
         super().__init__()
 
         self.z_dim = z_dim
@@ -18,8 +19,11 @@ class StochasticController(ControllerModel):
         self.fc_mean = torch.nn.Linear(z_dim + h_dim, action_dim)
         self.log_std = torch.nn.Parameter(torch.zeros(action_dim))  # learnable std
 
+        self.value = torch.nn.Linear(h_dim, 1)
 
-    def forward(self, z_t, h_t):
+    def forward(
+        self, z_t: torch.Tensor, h_t: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         x = torch.cat([z_t, h_t], dim=-1)
 
         mu = self.fc_mean(x)
@@ -32,20 +36,19 @@ class StochasticController(ControllerModel):
 
         # rsample() gets a sample that gradients can flow through
         action = action_dist.sample()
+        assert isinstance(action, torch.Tensor)
         # log_prob() correctly computes the log probability of the squashed action
         log_prob = action_dist.log_prob(action).sum(-1)
+        value = self.value(h_t)
+        entropy = action_dist.entropy().unsqueeze(-1)
 
-        return action, log_prob
+        return action, log_prob, value, entropy
 
-    def export_hyperparams(self):
-        return {
-            "z_dim": self.z_dim,
-            "h_dim": self.h_dim,
-            "action_dim": self.action_dim
-        }
+    def export_hyperparams(self) -> dict[str, int]:
+        return {"z_dim": self.z_dim, "h_dim": self.h_dim, "action_dim": self.action_dim}
 
-    def save_state(self):
-        return self.state_dict()
+    def save_state(self) -> dict[str, torch.Tensor]:
+        return cast(dict[str, Any], self.state_dict())
 
-    def load(self, state_dict):
+    def load(self, state_dict: dict) -> None:
         self.load_state_dict(state_dict)

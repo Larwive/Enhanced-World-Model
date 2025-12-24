@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 from datetime import datetime
 from time import sleep
 
@@ -16,7 +19,7 @@ class HyperSummaryWriter(SummaryWriter):
     Add possiblity to store hyperparameters.
     """
 
-    def add_hparams(self, hparam_dict, metric_dict):
+    def add_hparams(self, hparam_dict: dict, metric_dict: dict) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
         if type(hparam_dict) is not dict or type(metric_dict) is not dict:
             raise TypeError("hparam_dict and metric_dict should be dictionary.")
@@ -25,6 +28,7 @@ class HyperSummaryWriter(SummaryWriter):
         logdir = self._get_file_writer().get_logdir()
 
         with SummaryWriter(log_dir=logdir) as w_hp:
+            assert w_hp.file_writer is not None
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
@@ -32,7 +36,7 @@ class HyperSummaryWriter(SummaryWriter):
                 w_hp.add_scalar(k, v)
 
 
-def state_transform(state, is_image_based, device):
+def state_transform(state: np.ndarray, is_image_based: bool, device: torch.device) -> torch.Tensor:
     if is_image_based:
         # Transpose state from (H, W, C) to (C, H, W) for PyTorch
         if state.ndim == 3:
@@ -48,21 +52,21 @@ def state_transform(state, is_image_based, device):
 
 
 def step(
-    model,
-    state,
-    envs,
-    optimizer,
-    device,
-    is_image_based,
-    action_space,
+    model: WorldModel,
+    state: np.ndarray,
+    envs: Any,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    is_image_based: bool,
+    action_space: Any,
     iter_num: int = 0,
-    tensorboard_writer=None,
-    loss_instance=None,
+    tensorboard_writer: HyperSummaryWriter | None = None,
+    loss_instance: Callable | None = None,
     mode: str = "random",
     delay: float = 0.2,
     pretrain_vision: bool = False,
     pretrain_memory: bool = False,
-):
+) -> tuple[torch.Tensor, np.ndarray, torch.Tensor]:
     if loss_instance is None:
         loss_instance = MSELoss()  # Same as below.
     optimizer.zero_grad()
@@ -78,7 +82,7 @@ def step(
         mode == "random" or envs.num_envs > 1
     ):  # Forbidding manual mode if multiple environments. TODO: Allow manual mode in first env.
         actions = np.stack([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-    elif mode == "manual":
+    else:  # elif mode == "manual":
         sleep(delay)
         actions, restart, quit = register_input(envs)
 
@@ -117,20 +121,20 @@ def step(
 # TODO: Remove render_env arg when rendering of the first env is not done through cv2 anymore.
 def pretrain(
     model: WorldModel,
-    envs,
-    max_iter=10000,
+    envs: Any,
+    max_iter: int = 10000,
     device: torch.device = torch.device("cpu"),
     use_tensorboard: bool = True,
     learning_rate: float = 0.01,
-    loss_func: callable = MSELoss,
+    loss_func: Callable = MSELoss,
     mode: str = "random",
     delay: float = 0.2,
-    save_path="./",
-    save_prefix="",
+    save_path: Path = Path("./"),
+    save_prefix: str = "",
     pretrain_vision: bool = False,
     pretrain_memory: bool = False,
     render_mode: str = "",
-):
+) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     loss_func = loss_func()  # Add potential args here.
     is_image_based = len(envs.single_observation_space.shape) == 3
@@ -175,7 +179,9 @@ def pretrain(
             best_loss = loss
             last_save = model.iter_num
             model.save(
-                f"{save_path}pretrained_{save_prefix}_{envs.spec.id}_{datetime.now().isoformat(timespec='minutes')}.pt",
+                Path(
+                    f"{save_path}pretrained_{save_prefix}_{envs.spec.id}_{datetime.now().isoformat(timespec='minutes')}.pt"
+                ),
                 envs.single_observation_space,
                 envs.single_action_space,
             )

@@ -81,6 +81,7 @@ ignore = [
     "E501",  # Line too long (let formatter handle it)
     "F401",  # Unused imports in __init__.py (re-exports)
     "B008",  # Function call in argument defaults
+    "I001",  # Imports sorting
 ]
 
 [tool.ruff.format]
