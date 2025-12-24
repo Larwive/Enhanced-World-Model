@@ -1,5 +1,5 @@
 from abc import abstractmethod
-
+from typing import Any
 import torch
 
 from Model import Model
@@ -18,12 +18,14 @@ class VisionModel(Model):
         embed_dim: Dimension of the encoded latent representation
     """
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls
 
     @abstractmethod
-    def forward(self, input: torch.Tensor, **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Full forward pass: encode and decode observation.
 
