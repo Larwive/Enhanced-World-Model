@@ -117,22 +117,26 @@ def main():
         obs_space = envs.single_observation_space
         is_image_based = len(obs_space.shape) == 3
 
+        vision_model = VISION_REGISTRY.get(args.vision, None)
+        if vision_model is None:
+            raise Exception(
+                f"Vision model {args.vision} is not available.\nAvailable models: {list(VISION_REGISTRY.keys())}"
+            )
+
         if is_image_based:
             logger.info("Detected image-based environment.")
             # (H, W, C) -> (C, H, W)
             obs_shape = obs_space.shape
             input_shape = (obs_shape[2], obs_shape[0], obs_shape[1])
             vision_args = {"output_dim": input_shape[0], "embed_dim": 64}
+            if "image_based" not in vision_model.tags:
+                logger.warning(f"Vision model {args.vision} is not image-based.")
         else:
             logger.info("Detected vector-based environment.")
             input_shape = obs_space.shape
             vision_args = {"embed_dim": obs_space.shape[0]}
-
-        vision_model = VISION_REGISTRY.get(args.vision, None)
-        if vision_model is None:
-            raise Exception(
-                f"Vision model {args.vision} is not available.\nAvailable models: {list(VISION_REGISTRY.keys())}"
-            )
+            if "vector_based" not in vision_model.tags:
+                logger.warning(f"Vision model {args.vision} is not vector-based.")
 
         memory_model = MEMORY_REGISTRY.get(args.memory, None)
         if memory_model is None:
@@ -141,17 +145,20 @@ def main():
             )
 
         # Configure memory and controller based on environment
-        action_space = envs.single_action_space
-        if isinstance(action_space, gym.spaces.Discrete):
-            action_dim = action_space.n  # action_space.n is actually the number of possible values
-        else:  # Box, etc.
-            action_dim = action_space.shape[0]
-
         controller_model = CONTROLLER_REGISTRY.get(args.controller, None)
         if controller_model is None:
             raise Exception(
                 f"Controller model {args.controller} is not available.\nAvailable models: {list(CONTROLLER_REGISTRY.keys())}"
             )
+        action_space = envs.single_action_space
+        if isinstance(action_space, gym.spaces.Discrete):
+            action_dim = action_space.n  # action_space.n is actually the number of possible values
+            if "discrete" not in controller_model.tags:
+                logger.warning(f"Controller model {args.controller} is not suitable for discrete action space.")
+        else:  # Box, etc.
+            action_dim = action_space.shape[0]
+            if "continuous" not in controller_model.tags:
+                logger.warning(f"Controller model {args.controller} is not suitable for continuous action space.")
 
         memory_args = {
             "d_model": 128,
