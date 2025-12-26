@@ -32,6 +32,20 @@ class DiscreteModelPredictiveController(ControllerModel):
 
         return action, logp, value, entropy
 
+    def evaluate_actions(
+        self, z_t: torch.Tensor, h_t: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Evaluate log probability and entropy for given actions."""
+        x = torch.cat([z_t, h_t], dim=-1)
+        logits = self.policy(x)
+        dist = Categorical(logits=logits)
+
+        log_prob = dist.log_prob(actions.long())
+        value = self.value(h_t).squeeze(-1)
+        entropy = dist.entropy()
+
+        return log_prob, value, entropy
+
     def export_hyperparams(self) -> dict[str, int]:
         return {"z_dim": self.z_dim, "h_dim": self.h_dim, "action_dim": self.action_dim}
 

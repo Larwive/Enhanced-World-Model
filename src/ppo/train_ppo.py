@@ -262,58 +262,22 @@ def train_ppo(
         total_entropy = 0.0
         num_updates = 0
 
+        model.train()  # Ensure model is in training mode
         for _ppo_epoch in range(num_ppo_epochs):
             for batch in buffer.get_batches(batch_size):
                 # Get batch data
                 actions = batch["actions"]
-                old_log_probs = batch["old_log_probs"]
-                old_values = batch["old_values"]
-                advantages = batch["advantages"]
-                returns = batch["returns"]
-                z_t = batch["latent_states"]
-                h_t = batch["hidden_states"]
+                old_log_probs = batch["old_log_probs"].detach()
+                old_values = batch["old_values"].detach()
+                advantages = batch["advantages"].detach()
+                returns = batch["returns"].detach()
+                z_t = batch["latent_states"].detach()
+                h_t = batch["hidden_states"].detach()
 
-                # Get action distribution from controller using stored states
-                x = torch.cat([z_t, h_t], dim=-1)
-
-                if is_discrete:
-                    # Discrete action space
-                    # Access controller's network based on architecture
-                    if hasattr(model.controller, "shared_features"):
-                        # DeepDiscreteController
-                        features = model.controller.shared_features(x)
-                        logits = model.controller.actor(features)
-                        new_values = model.controller.critic(features).squeeze(-1)
-                    elif hasattr(model.controller, "policy"):
-                        # DiscreteModelPredictiveController
-                        logits = model.controller.policy(x)
-                        new_values = model.controller.value(h_t).squeeze(-1)
-                    else:
-                        raise ValueError("Unknown discrete controller architecture")
-
-                    from torch.distributions import Categorical
-
-                    cat_dist = Categorical(logits=logits)
-                    new_log_probs = cat_dist.log_prob(actions)
-                    entropy = cat_dist.entropy()
-                else:
-                    # Continuous action space
-                    if hasattr(model.controller, "mu_layer"):
-                        # ContinuousModelPredictiveController
-                        mu = model.controller.mu_layer(x)
-                        log_std = model.controller.log_std_layer(x)
-                        log_std = torch.clamp(log_std, -10, 2)
-                        std = torch.exp(log_std)
-                        new_values = model.controller.value(h_t).squeeze(-1)
-                    else:
-                        raise ValueError("Unknown continuous controller architecture")
-
-                    from torch.distributions import Normal
-
-                    norm_dist = Normal(mu, std)
-                    # Sum log_prob over action dimensions for continuous actions
-                    new_log_probs = norm_dist.log_prob(actions).sum(-1)
-                    entropy = norm_dist.entropy().sum(-1)
+                # Evaluate actions using the controller's evaluate_actions method
+                new_log_probs, new_values, entropy = model.controller.evaluate_actions(
+                    z_t, h_t, actions
+                )
 
                 # ============ POLICY LOSS (Clipped Surrogate) ============
                 log_ratio = new_log_probs - old_log_probs

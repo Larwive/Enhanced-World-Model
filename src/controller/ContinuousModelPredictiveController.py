@@ -41,6 +41,25 @@ class ContinuousModelPredictiveController(ControllerModel):
 
         return action, logp, value, entropy
 
+    def evaluate_actions(
+        self, z_t: torch.Tensor, h_t: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Evaluate log probability and entropy for given actions."""
+        x = torch.cat([z_t, h_t], dim=-1)
+
+        mu = self.mu_layer(x)
+        log_std = self.log_std_layer(x)
+        log_std = torch.clamp(log_std, -10, 2)
+        std = torch.exp(log_std)
+
+        dist = Normal(mu, std)
+
+        log_prob = dist.log_prob(actions).sum(-1)  # Sum over action dimensions
+        value = self.value(h_t).squeeze(-1)
+        entropy = dist.entropy().sum(-1)
+
+        return log_prob, value, entropy
+
     def export_hyperparams(self) -> dict[str, int]:
         return {"z_dim": self.z_dim, "h_dim": self.h_dim, "action_dim": self.action_dim}
 
