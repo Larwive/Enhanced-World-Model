@@ -325,7 +325,9 @@ def train_ppo(
         # ============ WORLD MODEL UPDATE ============
         # Train vision and memory using collected observations
         avg_world_loss = 0.0
-        if train_world_model:
+        # Only train if there are trainable vision/memory parameters
+        has_trainable_params = len(world_params) > 0 and any(p.requires_grad for p in world_params)
+        if train_world_model and has_trainable_params:
             wm_updates = 0
             for _wm_epoch in range(world_model_epochs):
                 for batch in buffer.get_batches(batch_size):
@@ -346,13 +348,14 @@ def train_ppo(
 
                     world_loss = vision_loss + vq_loss.mean()
 
-                    world_optimizer.zero_grad()
-                    world_loss.backward()
-                    nn.utils.clip_grad_norm_(world_params, max_grad_norm)
-                    world_optimizer.step()
-
-                    avg_world_loss += world_loss.item()
-                    wm_updates += 1
+                    # Only backprop if loss requires grad
+                    if world_loss.requires_grad:
+                        world_optimizer.zero_grad()
+                        world_loss.backward()
+                        nn.utils.clip_grad_norm_(world_params, max_grad_norm)
+                        world_optimizer.step()
+                        avg_world_loss += world_loss.item()
+                        wm_updates += 1
 
             avg_world_loss /= max(wm_updates, 1)
 
