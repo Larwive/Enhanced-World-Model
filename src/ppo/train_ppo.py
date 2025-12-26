@@ -6,10 +6,11 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
-
-from ppo.buffer import RolloutBuffer
-from WorldModel import WorldModel
 from torch.utils.tensorboard import SummaryWriter
+
+from WorldModel import WorldModel
+
+from .buffer import RolloutBuffer
 
 
 def state_transform(state: np.ndarray, is_image_based: bool, device: torch.device) -> torch.Tensor:
