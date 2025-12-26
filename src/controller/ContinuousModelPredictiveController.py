@@ -6,7 +6,7 @@ from controller import ControllerModel
 
 
 class ContinuousModelPredictiveController(ControllerModel):
-    def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
+    def __init__(self, z_dim: int, h_dim: int, action_dim: int, **_kwargs: Any) -> None:
         super().__init__()
 
         self.z_dim = z_dim
