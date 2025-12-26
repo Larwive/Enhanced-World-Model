@@ -1,0 +1,434 @@
+"""PPO (Proximal Policy Optimization) training loop for World Model."""
+
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+from ppo.buffer import RolloutBuffer
+from WorldModel import WorldModel
+from torch.utils.tensorboard import SummaryWriter
+
+
+def state_transform(state: np.ndarray, is_image_based: bool, device: torch.device) -> torch.Tensor:
+    """Transform numpy state to torch tensor."""
+    state_t = torch.from_numpy(state).float().to(device)
+    if is_image_based:
+        state_t = state_t.permute(0, 3, 1, 2) / 255.0
+    return state_t
+
+
+def train_ppo(
+    model: WorldModel,
+    envs: Any,
+    max_epochs: int = 1000,
+    device: torch.device = torch.device("cpu"),
+    # PPO hyperparameters
+    rollout_steps: int = 128,
+    num_ppo_epochs: int = 4,
+    batch_size: int = 64,
+    clip_range: float = 0.2,
+    clip_range_vf: float | None = None,  # None = no clipping
+    gamma: float = 0.99,
+    gae_lambda: float = 0.95,
+    # Learning rates
+    learning_rate: float = 3e-4,
+    policy_lr: float | None = None,  # None = use learning_rate
+    # Loss coefficients
+    value_coef: float = 0.5,
+    entropy_coef: float = 0.01,
+    max_grad_norm: float = 0.5,
+    # World model training
+    train_world_model: bool = True,
+    world_model_epochs: int = 1,
+    # Logging & saving
+    use_tensorboard: bool = True,
+    save_path: Path = Path("./"),
+    save_freq: int = 50,
+    log_freq: int = 1,
+) -> dict[str, list]:
+    """
+    Train world model with PPO algorithm.
+
+    PPO Algorithm:
+        1. Collect rollout_steps of experience with current policy
+        2. Compute GAE advantages
+        3. For num_ppo_epochs:
+            - Sample mini-batches
+            - Compute clipped surrogate loss
+            - Update policy and value function
+        4. Optionally train world model components
+        5. Repeat
+
+    Args:
+        model: WorldModel instance
+        envs: Vectorized gymnasium environments
+        max_epochs: Maximum number of training epochs (each epoch = 1 rollout)
+        device: Torch device
+        rollout_steps: Number of steps to collect per rollout
+        num_ppo_epochs: Number of PPO update epochs per rollout
+        batch_size: Mini-batch size for PPO updates
+        clip_range: PPO clipping parameter (ε)
+        clip_range_vf: Value function clipping (None = disabled)
+        gamma: Discount factor
+        gae_lambda: GAE lambda parameter
+        learning_rate: Learning rate for world model
+        policy_lr: Learning rate for policy (defaults to learning_rate)
+        value_coef: Value loss coefficient
+        entropy_coef: Entropy bonus coefficient
+        max_grad_norm: Maximum gradient norm for clipping
+        train_world_model: Whether to train vision/memory components
+        world_model_epochs: Epochs to train world model per rollout
+        use_tensorboard: Enable tensorboard logging
+        save_path: Path to save checkpoints
+        save_freq: Save model every N epochs
+        log_freq: Log metrics every N epochs
+
+    Returns:
+        Dictionary of training history
+    """
+    num_envs = envs.num_envs
+    obs_space = envs.single_observation_space
+    action_space = envs.single_action_space
+    is_image_based = len(obs_space.shape) == 3
+
+    # Determine observation shape for buffer
+    if is_image_based:
+        obs_shape = (obs_space.shape[2], obs_space.shape[0], obs_space.shape[1])
+    else:
+        obs_shape = obs_space.shape
+
+    policy_lr = policy_lr or learning_rate
+
+    # Setup optimizers
+    world_params = list(model.vision.parameters()) + list(model.memory.parameters())
+    if model.reward_predictor is not None:
+        world_params += list(model.reward_predictor.parameters())
+
+    world_optimizer = torch.optim.Adam(world_params, lr=learning_rate)
+    policy_optimizer = torch.optim.Adam(model.controller.parameters(), lr=policy_lr)
+
+    # Detect discrete vs continuous action space
+    is_discrete = hasattr(action_space, "n")
+    action_dim = action_space.n if is_discrete else action_space.shape[0]
+
+    # Setup buffer
+    buffer = RolloutBuffer(
+        buffer_size=rollout_steps,
+        num_envs=num_envs,
+        obs_shape=obs_shape,
+        action_dim=action_dim,
+        device=device,
+        gamma=gamma,
+        gae_lambda=gae_lambda,
+        is_discrete=is_discrete,
+    )
+
+    # Setup logging
+    writer = SummaryWriter() if use_tensorboard else None
+
+    # Training history
+    history: dict[str, list] = {
+        "epoch": [],
+        "reward": [],
+        "policy_loss": [],
+        "value_loss": [],
+        "entropy": [],
+        "world_loss": [],
+    }
+
+    # Initialize
+    state, _ = envs.reset()
+    episode_rewards = torch.zeros(num_envs, device=device)
+    episode_lengths = torch.zeros(num_envs, device=device)
+    completed_episodes = 0
+    total_steps = 0
+
+    best_reward = float("-inf")
+
+    print("=" * 60)
+    print("PPO Training")
+    print("=" * 60)
+    print(f"Epochs: {max_epochs}, Rollout steps: {rollout_steps}")
+    print(f"PPO epochs: {num_ppo_epochs}, Batch size: {batch_size}")
+    print(f"Clip range: {clip_range}, γ: {gamma}, λ: {gae_lambda}")
+    print(f"Entropy coef: {entropy_coef}, Value coef: {value_coef}")
+    print("=" * 60)
+
+    for epoch in range(max_epochs):
+        # ============ COLLECT ROLLOUT ============
+        buffer.reset()
+
+        for _step in range(rollout_steps):
+            state_tensor = state_transform(state, is_image_based, device)
+
+            with torch.no_grad():
+                # Get model outputs
+                output_dict = model(
+                    state_tensor,
+                    action_space=action_space,
+                    is_image_based=is_image_based,
+                    return_losses=True,
+                    last_reward=episode_rewards,
+                )
+
+                action = output_dict["action"]
+                log_prob = output_dict["log_probs"].squeeze(-1)
+                value = output_dict["value"].squeeze(-1)
+
+                # Get latent states for buffer
+                z_e = model.vision.encode(state_tensor, is_image_based=is_image_based)
+                z_t = z_e.mean(dim=(2, 3)) if is_image_based else z_e
+                h_t = output_dict["memory_hidden"]
+
+            # Step environment
+            actions_np = action.cpu().numpy()
+            next_state, reward, terminated, truncated, _ = envs.step(actions_np)
+            done = terminated | truncated
+            done_t = torch.from_numpy(done).to(device, dtype=torch.bool)
+            reward_t = torch.tensor(reward, dtype=torch.float32, device=device)
+
+            # Store in buffer
+            buffer.add(
+                obs=state_tensor,
+                action=action,
+                reward=reward_t,
+                value=value,
+                log_prob=log_prob,
+                done=done_t,
+                z_t=z_t,
+                h_t=h_t,
+            )
+
+            # Track episode stats
+            episode_rewards += reward_t
+            episode_lengths += 1
+            total_steps += num_envs
+            model.iter_num += num_envs
+
+            # Handle episode ends
+            for env_idx in torch.where(done_t)[0]:
+                completed_episodes += 1
+                model.nb_experiments += 1
+
+                if writer:
+                    writer.add_scalar(
+                        "rollout/episode_reward",
+                        episode_rewards[env_idx].item(),
+                        completed_episodes,
+                    )
+                    writer.add_scalar(
+                        "rollout/episode_length",
+                        episode_lengths[env_idx].item(),
+                        completed_episodes,
+                    )
+
+                # Track best
+                if episode_rewards[env_idx].item() > best_reward:
+                    best_reward = episode_rewards[env_idx].item()
+
+                episode_rewards[env_idx] = 0
+                episode_lengths[env_idx] = 0
+                model.reset_env_memory(env_idx)
+
+            state = next_state
+
+        # ============ COMPUTE ADVANTAGES ============
+        with torch.no_grad():
+            state_tensor = state_transform(state, is_image_based, device)
+            output_dict = model(
+                state_tensor,
+                action_space=action_space,
+                is_image_based=is_image_based,
+                return_losses=True,
+                last_reward=episode_rewards,
+            )
+            last_value = output_dict["value"]
+            last_done = torch.from_numpy(terminated | truncated).to(device, dtype=torch.bool)
+
+        buffer.compute_gae(last_value, last_done)
+
+        # Normalize advantages
+        adv_mean = buffer.advantages.mean()
+        adv_std = buffer.advantages.std() + 1e-8
+        buffer.advantages = (buffer.advantages - adv_mean) / adv_std
+
+        # ============ PPO UPDATE ============
+        total_policy_loss = 0.0
+        total_value_loss = 0.0
+        total_entropy = 0.0
+        num_updates = 0
+
+        for _ppo_epoch in range(num_ppo_epochs):
+            for batch in buffer.get_batches(batch_size):
+                # Get batch data
+                actions = batch["actions"]
+                old_log_probs = batch["old_log_probs"]
+                old_values = batch["old_values"]
+                advantages = batch["advantages"]
+                returns = batch["returns"]
+                z_t = batch["latent_states"]
+                h_t = batch["hidden_states"]
+
+                # Get action distribution from controller using stored states
+                x = torch.cat([z_t, h_t], dim=-1)
+
+                if is_discrete:
+                    # Discrete action space
+                    # Access controller's network based on architecture
+                    if hasattr(model.controller, "shared_features"):
+                        # DeepDiscreteController
+                        features = model.controller.shared_features(x)
+                        logits = model.controller.actor(features)
+                        new_values = model.controller.critic(features).squeeze(-1)
+                    elif hasattr(model.controller, "policy"):
+                        # DiscreteModelPredictiveController
+                        logits = model.controller.policy(x)
+                        new_values = model.controller.value(h_t).squeeze(-1)
+                    else:
+                        raise ValueError("Unknown discrete controller architecture")
+
+                    from torch.distributions import Categorical
+
+                    cat_dist = Categorical(logits=logits)
+                    new_log_probs = cat_dist.log_prob(actions)
+                    entropy = cat_dist.entropy()
+                else:
+                    # Continuous action space
+                    if hasattr(model.controller, "mu_layer"):
+                        # ContinuousModelPredictiveController
+                        mu = model.controller.mu_layer(x)
+                        log_std = model.controller.log_std_layer(x)
+                        log_std = torch.clamp(log_std, -10, 2)
+                        std = torch.exp(log_std)
+                        new_values = model.controller.value(h_t).squeeze(-1)
+                    else:
+                        raise ValueError("Unknown continuous controller architecture")
+
+                    from torch.distributions import Normal
+
+                    norm_dist = Normal(mu, std)
+                    # Sum log_prob over action dimensions for continuous actions
+                    new_log_probs = norm_dist.log_prob(actions).sum(-1)
+                    entropy = norm_dist.entropy().sum(-1)
+
+                # ============ POLICY LOSS (Clipped Surrogate) ============
+                log_ratio = new_log_probs - old_log_probs
+                ratio = torch.exp(log_ratio)
+
+                # Clipped surrogate loss
+                policy_loss_1 = advantages * ratio
+                policy_loss_2 = advantages * torch.clamp(ratio, 1 - clip_range, 1 + clip_range)
+                policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
+
+                # ============ VALUE LOSS ============
+                if clip_range_vf is not None:
+                    # Clipped value loss
+                    values_clipped = old_values + torch.clamp(
+                        new_values - old_values, -clip_range_vf, clip_range_vf
+                    )
+                    value_loss_1 = (new_values - returns) ** 2
+                    value_loss_2 = (values_clipped - returns) ** 2
+                    value_loss = 0.5 * torch.max(value_loss_1, value_loss_2).mean()
+                else:
+                    value_loss = 0.5 * ((new_values - returns) ** 2).mean()
+
+                # ============ ENTROPY BONUS ============
+                entropy_loss = -entropy.mean()
+
+                # ============ TOTAL LOSS ============
+                loss = policy_loss + value_coef * value_loss + entropy_coef * entropy_loss
+
+                # ============ UPDATE ============
+                policy_optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.controller.parameters(), max_grad_norm)
+                policy_optimizer.step()
+
+                total_policy_loss += policy_loss.item()
+                total_value_loss += value_loss.item()
+                total_entropy += entropy.mean().item()
+                num_updates += 1
+
+        # Average losses
+        avg_policy_loss = total_policy_loss / max(num_updates, 1)
+        avg_value_loss = total_value_loss / max(num_updates, 1)
+        avg_entropy = total_entropy / max(num_updates, 1)
+
+        # ============ WORLD MODEL UPDATE ============
+        # Train vision and memory using collected observations
+        avg_world_loss = 0.0
+        if train_world_model:
+            wm_updates = 0
+            for _wm_epoch in range(world_model_epochs):
+                for batch in buffer.get_batches(batch_size):
+                    obs = batch["observations"]
+
+                    # Vision forward pass
+                    recon, vq_loss = model.vision(obs)
+
+                    # Vision loss (reconstruction for VQ-VAE, or predictive for JEPA)
+                    if recon.shape == obs.shape:
+                        vision_loss = torch.nn.functional.mse_loss(recon, obs)
+                    else:
+                        vision_loss = (
+                            vq_loss.mean()
+                            if vq_loss.numel() > 0
+                            else torch.tensor(0.0, device=device)
+                        )
+
+                    world_loss = vision_loss + vq_loss.mean()
+
+                    world_optimizer.zero_grad()
+                    world_loss.backward()
+                    nn.utils.clip_grad_norm_(world_params, max_grad_norm)
+                    world_optimizer.step()
+
+                    avg_world_loss += world_loss.item()
+                    wm_updates += 1
+
+            avg_world_loss /= max(wm_updates, 1)
+
+        # ============ LOGGING ============
+        if epoch % log_freq == 0:
+            print(
+                f"Epoch {epoch:4d} | "
+                f"Episodes: {completed_episodes:5d} | "
+                f"Best: {best_reward:7.1f} | "
+                f"Policy: {avg_policy_loss:.4f} | "
+                f"Value: {avg_value_loss:.4f} | "
+                f"Entropy: {avg_entropy:.4f}"
+            )
+
+        if writer:
+            writer.add_scalar("train/policy_loss", avg_policy_loss, epoch)
+            writer.add_scalar("train/value_loss", avg_value_loss, epoch)
+            writer.add_scalar("train/entropy", avg_entropy, epoch)
+            writer.add_scalar("train/world_loss", avg_world_loss, epoch)
+            writer.add_scalar("train/total_steps", total_steps, epoch)
+
+        # Record history
+        history["epoch"].append(epoch)
+        history["policy_loss"].append(avg_policy_loss)
+        history["value_loss"].append(avg_value_loss)
+        history["entropy"].append(avg_entropy)
+        history["world_loss"].append(avg_world_loss)
+
+        # ============ SAVE ============
+        if (epoch + 1) % save_freq == 0:
+            model.save(save_path / f"ppo_epoch_{epoch + 1}.pt", obs_space, action_space)
+
+    # Final save
+    model.save(save_path / "ppo_final.pt", obs_space, action_space)
+
+    if writer:
+        writer.close()
+
+    print("=" * 60)
+    print(f"Training complete! Best reward: {best_reward:.1f}")
+    print(f"Total episodes: {completed_episodes}, Total steps: {total_steps}")
+    print("=" * 60)
+
+    return history
