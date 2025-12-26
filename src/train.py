@@ -219,8 +219,8 @@ def train(
     last_save = model.iter_num
     nb_experiments = 0
     state, info = envs.reset()
-    local_iter_num = torch.zeros(envs.num_envs)
-    total_episode_loss = torch.zeros(envs.num_envs)
+    local_iter_num = torch.zeros(envs.num_envs, device=device)
+    total_episode_loss = torch.zeros(envs.num_envs, device=device)
 
     # For the reinforce-style loss.
     discounted_return = torch.zeros(envs.num_envs, device=device)
