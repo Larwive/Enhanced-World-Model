@@ -197,7 +197,7 @@ def print_advanced_args(args: Namespace) -> None:
         "Training"
         if not pretraining
         else "Pretraining "
-        + "and ".join(["Vision", "Memory"][1 - args.pretrain_vision : 1 + args.pretrain_memory])
+        + " and ".join(["Vision", "Memory"][1 - args.pretrain_vision : 1 + args.pretrain_memory])
     )
     print(f"\n{Color.CYAN}  State: {Color.MAGENTA}{state}{Color.RESET}")
 
