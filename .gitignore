@@ -211,3 +211,5 @@ __marimo__/
 
 .DS_Store
 *.pt
+
+cli.json
