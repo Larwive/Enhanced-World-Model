@@ -5,6 +5,8 @@ from memory import MemoryModel
 
 
 class TemporalTransformer(MemoryModel):
+    tags: list[str] = []
+
     def __init__(
         self,
         latent_dim: int = 4,
