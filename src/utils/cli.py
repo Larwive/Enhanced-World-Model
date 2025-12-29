@@ -1,11 +1,10 @@
+import json
+import os
+from argparse import Namespace
 from collections.abc import Callable
 
-from argparse import Namespace
-import os
-import json
-
 from utils.colors import Color
-from utils.gym_tools import get_all_gym_envs, gym_is_image_based, action_space_is_discrete
+from utils.gym_tools import action_space_is_discrete, get_all_gym_envs, gym_is_image_based
 
 
 def save_args(args: Namespace) -> None:
@@ -169,13 +168,16 @@ def edit_main_args(
             except ValueError:
                 print(f"{Color.RED}Invalid value{Color.RESET}")
                 continue
+
         elif edit_choice == 8:
-            print(f"{Color.CYAN}  - 0: {Color.YELLOW}RGB array (no render){Color.RESET}")
-            print(f"{Color.CYAN}  - 1: {Color.YELLOW}Human{Color.RESET}")
+            render_modes = {"0": ("rgb_array", "RGB array (no render)"), "1": ("human", "Human")}
+            for key, (_, description) in render_modes.items():
+                print(f"{Color.CYAN}  - {key}: {Color.YELLOW}{description}{Color.RESET}")
+
             value = input(f"{Color.GREEN}Choose new render mode: {Color.RESET}")
-            render_choices = ["rgb_array", "human"]
-            if value.isdigit() and 0 <= int(value) < len(render_choices):
-                args.render_mode = render_choices[int(value)]
+
+            if value in render_modes:
+                args.render_mode = render_modes[value][0]
             else:
                 print(f"{Color.RED}Invalid render choice.{Color.RESET}")
                 continue
