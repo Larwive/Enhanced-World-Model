@@ -1,4 +1,5 @@
-from typing import Any
+from typing import Any, cast
+
 import torch
 
 from vision import VisionModel
@@ -33,7 +34,7 @@ class Identity(VisionModel):
         }
 
     def save_state(self) -> dict[str, torch.Tensor]:
-        return {}
+        return cast(dict[str, Any], self.state_dict())
 
-    def load(self) -> None:
-        pass
+    def load(self, state_dict: dict[str, torch.Tensor]) -> None:
+        self.load_state_dict(state_dict)
