@@ -5,7 +5,7 @@ from reward_predictor import RewardPredictorModel
 
 
 class LinearPredictor(RewardPredictorModel):
-    def __init__(self, z_dim: int, h_dim: int, action_dim: int):
+    def __init__(self, z_dim: int, h_dim: int):
         super().__init__()
 
         self.z_dim = z_dim

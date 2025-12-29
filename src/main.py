@@ -157,11 +157,15 @@ def main() -> None:
         if isinstance(action_space, gym.spaces.Discrete):
             action_dim = action_space.n  # action_space.n is actually the number of possible values
             if "discrete" not in controller_model.tags:
-                logger.warning(f"Controller model {args.controller} is not suitable for discrete action space.")
+                logger.warning(
+                    f"Controller model {args.controller} is not suitable for discrete action space."
+                )
         else:  # Box, etc.
             action_dim = action_space.shape[0]
             if "continuous" not in controller_model.tags:
-                logger.warning(f"Controller model {args.controller} is not suitable for continuous action space.")
+                logger.warning(
+                    f"Controller model {args.controller} is not suitable for continuous action space."
+                )
 
         memory_args = {
             "d_model": 128,

@@ -1,5 +1,6 @@
-from typing import Any, cast
 from pathlib import Path
+from typing import Any, cast
+
 import gymnasium as gym
 import numpy as np
 import torch
@@ -9,6 +10,12 @@ import memory
 import reward_predictor
 import vision
 from Model import Model
+from utils.registry import discover_modules
+
+VISION_REGISTRY: dict = discover_modules(vision)
+MEMORY_REGISTRY: dict = discover_modules(memory)
+CONTROLLER_REGISTRY: dict = discover_modules(controller)
+REWARD_PREDICTOR_REGISTRY: dict = discover_modules(reward_predictor)
 
 
 def describe_action_space(space: Any) -> dict:
@@ -230,9 +237,9 @@ class WorldModel(Model):
             saving_dict["reward_predictor_dict"] = self.reward_predictor.save_state()
         torch.save(saving_dict, path)
 
-    def load(self, path: Path, obs_space: Any, action_space: Any) -> None:
+    def load(self, path: Path, obs_space: Any, action_space: Any, device: torch.device) -> None:
         # TODO: Check input/output shape consistencies between components before loading the weights ?
-        saved_dict = torch.load(path, weights_only=False)
+        saved_dict = torch.load(path, weights_only=False, map_location=device)
 
         assert (
             obs_space == saved_dict["obs_space"] and action_space == saved_dict["action_space"]
@@ -240,24 +247,23 @@ class WorldModel(Model):
         self.iter_num = saved_dict["iter_num"]
         self.nb_experiments = saved_dict["nb_experiments"]
 
-        self.vision = getattr(vision, saved_dict["vision_model"])(**saved_dict["vision_args"])
+        self.vision = VISION_REGISTRY[saved_dict["vision_model"]](**saved_dict["vision_args"])
         self.vision.load(saved_dict["vision_dict"])
 
-        self.memory = getattr(memory, saved_dict["memory_model"])(**saved_dict["memory_args"])
+        self.memory = MEMORY_REGISTRY[saved_dict["memory_model"]](**saved_dict["memory_args"])
         self.memory.load(saved_dict["memory_dict"])
 
-        self.controller = getattr(controller, saved_dict["controller_model"])(
+        self.controller = CONTROLLER_REGISTRY[saved_dict["controller_model"]](
             **saved_dict["controller_args"]
         )
         self.controller.load(saved_dict["controller_dict"])
 
         if "reward_predictor_dict" in saved_dict:
-            rp_cls: type[reward_predictor.RewardPredictorModel] = getattr(
-                reward_predictor,
-                saved_dict["reward_predictor_model"],
+            rp = REWARD_PREDICTOR_REGISTRY[saved_dict["reward_predictor_model"]](
+                **saved_dict["reward_predictor_args"]
             )
-            self.reward_predictor = rp_cls(**saved_dict["reward_predictor_args"])
-            self.reward_predictor.load(saved_dict["reward_predictor_dict"])
+            rp.load(saved_dict["reward_predictor_dict"])
+            self.reward_predictor = rp
 
     def set_reward_predictor(
         self,

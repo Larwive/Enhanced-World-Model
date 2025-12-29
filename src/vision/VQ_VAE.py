@@ -152,6 +152,7 @@ class VQ_VAE(VisionModel):
     """
     Implementation of the VQ-VAE model (https://arxiv.org/pdf/1711.00937).
     """
+
     tags = ["image_based"]
 
     def __init__(
