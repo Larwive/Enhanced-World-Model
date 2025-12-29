@@ -1,4 +1,4 @@
-from _typeshed import SupportsWrite
+from typing import TextIO
 from sys import stdout
 
 
@@ -28,11 +28,13 @@ class Style:
 
 
 class Logger:
-    def __init__(self, fd: SupportsWrite[str] = stdout) -> None:
+    def __init__(self, fd: TextIO = stdout) -> None:
         self.fd = fd
 
-    def log(self, *messages: str, color: str = Style.GREEN, sep: str = "\n") -> None:
-        print(f"{color}{sep.join(messages)}{Style.RESET}", file=self.fd)
+    def log(
+        self, *messages: str, style: str = Style.GREEN, sep: str = "\n", end: str = "\n"
+    ) -> None:
+        print(f"{style}{sep.join(messages)}{Style.RESET}", file=self.fd, end=end)
 
     def warn(self, *messages: str, sep: str = "\n") -> None:
         print(f"{Style.YELLOW}{Style.BOLD}Warning: {sep.join(messages)}{Style.RESET}", file=self.fd)
@@ -40,16 +42,22 @@ class Logger:
     def error(self, *messages: str, sep: str = "\n") -> None:
         print(f"{Style.RED}{Style.INVERT}Error: {sep.join(messages)}{Style.RESET}", file=self.fd)
 
+    def input(
+        self, *messages: str, style: str = Style.GREEN, sep: str = "\n", end: str = ""
+    ) -> str:
+        self.log(f"{sep.join(messages)}", style=style, end=end)
+        return input()
+
     def dict_log(
         self,
         data: dict,
-        key_color: str = Style.CYAN,
-        value_color: str = Style.YELLOW,
+        key_style: str = Style.CYAN,
+        value_style: str = Style.YELLOW,
         sep: str = "\n",
     ) -> None:
         print(
             *(
-                f"{key_color}{key}: {value_color}{value}{Style.RESET}"
+                f"{key_style}{key}: {value_style}{value}{Style.RESET}"
                 for key, value in data.items()
             ),
             file=self.fd,
