@@ -1,14 +1,14 @@
-from typing import cast, Any
+from typing import Any, cast
+
 import torch
 
 from reward_predictor import RewardPredictorModel
 
 
 class LinearPredictor(RewardPredictorModel):
-
     tags: list[str] = []
 
-    def __init__(self, z_dim: int, h_dim: int):
+    def __init__(self, z_dim: int, h_dim: int, **_kwargs: Any):
         super().__init__()
 
         self.z_dim = z_dim

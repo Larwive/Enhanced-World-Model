@@ -65,7 +65,7 @@ def main() -> None:
     )  # CartPole-v1
     parser.add_argument("--vision", type=str, default="Identity")
     parser.add_argument("--memory", type=str, default="TemporalTransformer")
-    parser.add_argument("--controller", type=str, default="DiscreteModelPredictiveController")
+    parser.add_argument("--controller", type=str, default="DeepDiscreteController")
     parser.add_argument("--reward-predictor", type=str, default="LinearPredictor")
 
     parser.add_argument("--max-epoch", type=int, default=200)
@@ -255,6 +255,7 @@ def main() -> None:
                 max_iter=args.max_epoch,
                 device=device,
                 learning_rate=args.learning_rate,
+                save_path=Path(args.save_path),
                 render_mode=args.render_mode,
             )
 

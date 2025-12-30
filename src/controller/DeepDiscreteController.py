@@ -16,6 +16,8 @@ def orthogonal_init(layer: nn.Linear, gain: float = 1.0) -> None:
 
 
 class DeepDiscreteController(ControllerModel):
+    tags = ["discrete", "stochastic"]
+
     """
     A deeper discrete controller with:
     - Multi-layer feature extraction
