@@ -7,7 +7,8 @@ import subprocess
 import sys
 
 import gradio as gr
-from gymnasium.envs.registration import registry
+
+from utils.gym_tools import get_all_gym_envs
 
 
 class PopenKwargs(TypedDict, total=False):
@@ -18,12 +19,6 @@ class PopenKwargs(TypedDict, total=False):
     bufsize: int | None  # allow None or object-like values
     creationflags: int
     preexec_fn: Callable[[], object]
-
-
-def get_all_gym_envs() -> list:
-    """Returns a list of all registered gym environments."""
-    all_envs = list(registry.keys())
-    return [env for env in all_envs if not env.startswith("_")]
 
 
 # Stores the currently running subprocess

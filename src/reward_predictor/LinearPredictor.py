@@ -5,6 +5,9 @@ from reward_predictor import RewardPredictorModel
 
 
 class LinearPredictor(RewardPredictorModel):
+
+    tags: list[str] = []
+
     def __init__(self, z_dim: int, h_dim: int):
         super().__init__()
 

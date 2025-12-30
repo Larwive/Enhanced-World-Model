@@ -13,7 +13,9 @@ import reward_predictor
 from pretrain import pretrain
 from train import train
 from utils.registry import discover_modules
+from utils.cli import CLI
 from WorldModel import WorldModel
+from utils.gym_tools import gym_is_image_based
 
 VISION_REGISTRY: dict = discover_modules(vision)
 MEMORY_REGISTRY: dict = discover_modules(memory)
@@ -44,10 +46,16 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    interface_group = parser.add_mutually_exclusive_group()
+    interface_group.add_argument(
         "--ui",
         action="store_true",
         help="Launch the Gradio interface instead of training directly.",
+    )
+    interface_group.add_argument(
+        "--cli",
+        action="store_true",
+        help="Runs the command line interface.",
     )
     parser.add_argument(
         "--env-name",
@@ -55,21 +63,22 @@ def main() -> None:
         default="CarRacing-v3",
         help="The Gym environment to use.",
     )  # CartPole-v1
-    parser.add_argument("--random-seed", type=int, default=42)
-    parser.add_argument("--max-epoch", type=int, default=200)
-    parser.add_argument("--patience", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--save-path", default="./saved_models/")
-    parser.add_argument("--load-path", default="")
-    parser.add_argument("--gpu", default="0")
-    parser.add_argument("--render-mode", type=str, default="rgb_array")
-    parser.add_argument("--env-batch-number", type=str, default="auto")
     parser.add_argument("--vision", type=str, default="Identity")
     parser.add_argument("--memory", type=str, default="TemporalTransformer")
     parser.add_argument("--controller", type=str, default="DiscreteModelPredictiveController")
     parser.add_argument("--reward-predictor", type=str, default="LinearPredictor")
+
+    parser.add_argument("--max-epoch", type=int, default=200)
+    parser.add_argument("--patience", type=int, default=5)  # Unused yet, not in CLI.
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--env-batch-number", type=str, default="auto")
+    parser.add_argument("--render-mode", type=str, default="rgb_array")
+
+    parser.add_argument("--random-seed", type=int, default=42)
+    parser.add_argument("--save-path", default="./saved_models/")
+    parser.add_argument("--load-path", default="")
+    parser.add_argument("--gpu", default="0")
 
     # Pretraining args
     parser.add_argument(
@@ -83,7 +92,8 @@ def main() -> None:
     parser.add_argument("--pretrain-memory", action="store_true")
 
     args = parser.parse_args()
-
+    if args.cli:
+        CLI(args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY, REWARD_PREDICTOR_REGISTRY)
     env_batch_size = int(args.env_batch_number) if args.env_batch_number.isdigit() else "auto"
     if env_batch_size == "auto":
         # TODO: Automatically determines the maximum size of the batch.
@@ -119,7 +129,7 @@ def main() -> None:
 
         obs_shape = obs_space.shape
         assert obs_shape is not None
-        is_image_based = len(obs_shape) == 3
+        is_image_based = gym_is_image_based(args.env_name)
 
         vision_model = VISION_REGISTRY.get(args.vision, None)
         if vision_model is None:
@@ -136,8 +146,8 @@ def main() -> None:
                 logger.warning(f"Vision model {args.vision} is not image-based.")
         else:
             logger.info("Detected vector-based environment.")
-            input_shape = obs_space.shape
-            vision_args = {"embed_dim": obs_space.shape[0]}
+            input_shape = obs_shape
+            vision_args = {"embed_dim": obs_shape[0]}
             if "vector_based" not in vision_model.tags:
                 logger.warning(f"Vision model {args.vision} is not vector-based.")
 
@@ -161,6 +171,7 @@ def main() -> None:
                     f"Controller model {args.controller} is not suitable for discrete action space."
                 )
         else:  # Box, etc.
+            assert action_space.shape
             action_dim = action_space.shape[0]
             if "continuous" not in controller_model.tags:
                 logger.warning(

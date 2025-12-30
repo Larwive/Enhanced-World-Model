@@ -7,6 +7,8 @@ from reward_predictor import RewardPredictorModel
 
 
 class DensePredictor(RewardPredictorModel):
+    tags: list[str] = []
+
     def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
         super().__init__()
 
