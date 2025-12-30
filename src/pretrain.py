@@ -1,8 +1,8 @@
 from collections.abc import Callable
-from pathlib import Path
-from typing import Any
 from datetime import datetime
+from pathlib import Path
 from time import sleep
+from typing import Any
 
 import numpy as np
 import torch
@@ -91,15 +91,20 @@ def step(
 
     if pretrain_memory:
         with torch.no_grad():
+            new_state_tensor = state_transform(
+                new_state, is_image_based=is_image_based, device=device
+            )
             vision_encoded = model.vision.encode(
-                state_transform(new_state, is_image_based=is_image_based, device=device),
+                new_state_tensor,
                 is_image_based=is_image_based,
             )
             if is_image_based:
                 vision_encoded = vision_encoded.mean(dim=(2, 3))
+            del new_state_tensor
         total_loss = total_loss + torch.nn.functional.mse_loss(
             vision_encoded, output_dict["memory_prediction"]
         )
+        del vision_encoded
 
     if (
         pretrain_vision or pretrain_memory
@@ -116,7 +121,10 @@ def step(
 
     optimizer.step()
 
-    return total_loss.detach(), new_state, dones
+    # Explicitly free intermediate tensors to prevent memory leaks
+    loss_detached = total_loss.detach()
+    del state_tensor, output_dict, total_loss
+    return loss_detached, new_state, dones
 
 
 # TODO: Remove render_env arg when rendering of the first env is not done through cv2 anymore.
@@ -145,12 +153,13 @@ def pretrain(
 
     model.iter_num += 1
 
-    best_loss = torch.inf
+    best_loss = float("inf")
     last_save = model.iter_num
     nb_experiments = 0
     state, info = envs.reset()
     local_iter_num = torch.zeros(envs.num_envs, device=device)
     total_episode_loss = torch.zeros(envs.num_envs, device=device)
+    cache_clear_interval = 100  # Clear GPU cache every N iterations
     while nb_experiments < max_iter:
         loss, state, dones = step(
             model,
@@ -170,14 +179,20 @@ def pretrain(
         )
         # print(loss)
         total_episode_loss += loss
+        loss_mean = loss.mean().item()  # Extract scalar for comparison before deleting
+        del loss
         if render_mode == "human":
             render_first_env(envs)
+
+        # Periodically clear GPU cache to prevent memory fragmentation
+        if model.iter_num % cache_clear_interval == 0 and device.type == "cuda":
+            torch.cuda.empty_cache()
 
         model.iter_num += envs.num_envs
         local_iter_num += 1
 
-        if loss < best_loss and model.iter_num > last_save + 5:
-            best_loss = loss
+        if loss_mean < best_loss and model.iter_num > last_save + 5:
+            best_loss = loss_mean
             last_save = model.iter_num
             model.save(
                 Path(
