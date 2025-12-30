@@ -16,7 +16,12 @@ class VisionModel(Model):
     Attributes:
         input_shape: Shape of input observations (e.g., (3, 96, 96) for images or (4,) for vectors)
         embed_dim: Dimension of the encoded latent representation
+        is_reconstruction_based: Whether this model outputs pixel reconstructions (True for VQ_VAE)
+            or latent predictions (False for JEPA). Used to determine loss computation.
     """
+
+    # Override in subclasses. True for VQ_VAE, False for JEPA.
+    is_reconstruction_based: bool = True
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
