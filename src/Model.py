@@ -1,6 +1,6 @@
 import abc
-from typing import Any, Self
 from pathlib import Path
+from typing import Any, Self
 
 import torch
 from torch.nn import Module

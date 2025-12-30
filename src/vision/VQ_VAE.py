@@ -130,19 +130,23 @@ class VectorQuantizerEMA(torch.nn.Module):
         z_q_st = z_e + (z_q - z_e).detach()
 
         if self.training:
-            encodings = torch.zeros(indices.size(0), self.num_embeddings, device=z_e.device)
-            encodings.scatter_(1, indices.unsqueeze(1), 1)
+            # EMA updates don't need gradients - wrap to prevent memory leak
+            with torch.no_grad():
+                encodings = torch.zeros(indices.size(0), self.num_embeddings, device=z_e.device)
+                encodings.scatter_(1, indices.unsqueeze(1), 1)
 
-            cluster_size = encodings.sum(0)
-            self.cluster_size.mul_(self.decay).add_(cluster_size, alpha=1 - self.decay)
+                cluster_size = encodings.sum(0)
+                self.cluster_size.mul_(self.decay).add_(cluster_size, alpha=1 - self.decay)
 
-            embed_sum = flat.t() @ encodings
-            self.embed_avg.mul_(self.decay).add_(embed_sum.t(), alpha=1 - self.decay)
+                embed_sum = flat.t() @ encodings
+                self.embed_avg.mul_(self.decay).add_(embed_sum.t(), alpha=1 - self.decay)
 
-            n = self.cluster_size.sum()
-            cluster_size = (self.cluster_size + self.eps) / (n + self.num_embeddings * self.eps) * n
+                n = self.cluster_size.sum()
+                cluster_size = (
+                    (self.cluster_size + self.eps) / (n + self.num_embeddings * self.eps) * n
+                )
 
-            self.embedding.data.copy_(self.embed_avg / cluster_size.unsqueeze(1))
+                self.embedding.data.copy_(self.embed_avg / cluster_size.unsqueeze(1))
 
         commitment_loss = torch.mean((z_q_st.detach() - z_e) ** 2)
 
