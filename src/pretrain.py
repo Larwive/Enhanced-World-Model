@@ -90,12 +90,13 @@ def step(
     dones = torch.from_numpy(terminated | truncated).to(device=device, dtype=torch.bool)
 
     if pretrain_memory:
-        vision_encoded = model.vision.encode(
-            state_transform(new_state, is_image_based=is_image_based, device=device),
-            is_image_based=is_image_based,
-        )
-        if is_image_based:
-            vision_encoded = vision_encoded.mean(dim=(2, 3))
+        with torch.no_grad():
+            vision_encoded = model.vision.encode(
+                state_transform(new_state, is_image_based=is_image_based, device=device),
+                is_image_based=is_image_based,
+            )
+            if is_image_based:
+                vision_encoded = vision_encoded.mean(dim=(2, 3))
         total_loss = total_loss + torch.nn.functional.mse_loss(
             vision_encoded, output_dict["memory_prediction"]
         )
@@ -148,8 +149,8 @@ def pretrain(
     last_save = model.iter_num
     nb_experiments = 0
     state, info = envs.reset()
-    local_iter_num = torch.zeros(envs.num_envs)
-    total_episode_loss = torch.zeros(envs.num_envs)
+    local_iter_num = torch.zeros(envs.num_envs, device=device)
+    total_episode_loss = torch.zeros(envs.num_envs, device=device)
     while nb_experiments < max_iter:
         loss, state, dones = step(
             model,
