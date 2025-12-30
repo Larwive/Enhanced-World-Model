@@ -48,6 +48,7 @@ class JEPAEncoder(nn.Module):
         embed_dim: int,
         kernel_size: int = 4,
         stride: int = 2,
+        **_kwargs: Any,
     ) -> None:
         super().__init__()
 
@@ -108,6 +109,9 @@ class JEPA(VisionModel):
         - EMA target prevents collapse
         - More sample efficient
     """
+
+    # JEPA does NOT reconstruct pixels - it predicts in latent space
+    is_reconstruction_based: bool = False
 
     def __init__(
         self,

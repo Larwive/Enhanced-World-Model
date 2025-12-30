@@ -1,4 +1,5 @@
 from typing import Any, cast
+
 import torch
 import torch.nn.functional as F
 
@@ -164,6 +165,7 @@ class VQ_VAE(VisionModel):
         embed_dim: int = 64,
         kernel_size: int = 4,
         stride: int = 2,
+        **_kwargs: Any,
     ):
         super().__init__()
 
