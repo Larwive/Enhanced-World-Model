@@ -147,6 +147,8 @@ def train(
         "value_loss": [],
         "entropy": [],
         "world_loss": [],
+        "vision_loss": [],
+        "memory_loss": [],
     }
 
     # Initialize
@@ -200,6 +202,12 @@ def train(
             done_t = torch.from_numpy(done).to(device, dtype=torch.bool)
             reward_t = torch.tensor(reward, dtype=torch.float32, device=device)
 
+            # Compute next latent state for memory training
+            with torch.no_grad():
+                next_state_tensor = state_transform(next_state, is_image_based, device)
+                z_e_next = model.vision.encode(next_state_tensor, is_image_based=is_image_based)
+                z_next = z_e_next.mean(dim=(2, 3)) if is_image_based else z_e_next
+
             # Store in buffer
             buffer.add(
                 obs=state_tensor,
@@ -210,6 +218,7 @@ def train(
                 done=done_t,
                 z_t=z_t,
                 h_t=h_t,
+                z_next=z_next,
             )
 
             # Track episode stats
@@ -334,6 +343,8 @@ def train(
         # ============ WORLD MODEL UPDATE ============
         # Train vision and memory using collected observations
         avg_world_loss = 0.0
+        avg_vision_loss = 0.0
+        avg_memory_loss = 0.0
         # Only train if there are trainable vision/memory parameters
         has_trainable_params = len(world_params) > 0 and any(p.requires_grad for p in world_params)
         if train_world_model and has_trainable_params:
@@ -341,6 +352,18 @@ def train(
             for _wm_epoch in range(world_model_epochs):
                 for batch in buffer.get_batches(batch_size):
                     obs = batch["observations"]
+                    z_t = batch["latent_states"]
+                    h_t = batch["hidden_states"]
+                    z_next_actual = batch["next_latent_states"]
+                    actions = batch["actions"]
+
+                    # Convert discrete actions to one-hot for memory
+                    if is_discrete:
+                        a_t = torch.nn.functional.one_hot(
+                            actions.long(), num_classes=action_dim
+                        ).float()
+                    else:
+                        a_t = actions
 
                     # Vision forward pass
                     recon, vq_loss = model.vision(obs)
@@ -355,7 +378,11 @@ def train(
                             else torch.tensor(0.0, device=device)
                         )
 
-                    world_loss = vision_loss + vq_loss.mean()
+                    # Memory loss: predict next latent state
+                    z_next_pred = model.memory.predict_next(z_t, a_t, h_t)
+                    memory_loss = torch.nn.functional.mse_loss(z_next_pred, z_next_actual)
+
+                    world_loss = vision_loss + vq_loss.mean() + memory_loss
 
                     # Only backprop if loss requires grad
                     if world_loss.requires_grad:
@@ -364,9 +391,13 @@ def train(
                         nn.utils.clip_grad_norm_(world_params, max_grad_norm)
                         world_optimizer.step()
                         avg_world_loss += world_loss.item()
+                        avg_vision_loss += vision_loss.item()
+                        avg_memory_loss += memory_loss.item()
                         wm_updates += 1
 
             avg_world_loss /= max(wm_updates, 1)
+            avg_vision_loss /= max(wm_updates, 1)
+            avg_memory_loss /= max(wm_updates, 1)
 
         # ============ LOGGING ============
         if epoch % log_freq == 0:
@@ -384,6 +415,8 @@ def train(
             writer.add_scalar("train/value_loss", avg_value_loss, epoch)
             writer.add_scalar("train/entropy", avg_entropy, epoch)
             writer.add_scalar("train/world_loss", avg_world_loss, epoch)
+            writer.add_scalar("train/vision_loss", avg_vision_loss, epoch)
+            writer.add_scalar("train/memory_loss", avg_memory_loss, epoch)
             writer.add_scalar("train/total_steps", total_steps, epoch)
 
         # Record history
@@ -392,6 +425,8 @@ def train(
         history["value_loss"].append(avg_value_loss)
         history["entropy"].append(avg_entropy)
         history["world_loss"].append(avg_world_loss)
+        history["vision_loss"].append(avg_vision_loss)
+        history["memory_loss"].append(avg_memory_loss)
 
         # ============ SAVE ============
         if (epoch + 1) % save_freq == 0:

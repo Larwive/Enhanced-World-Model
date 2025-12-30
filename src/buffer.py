@@ -78,6 +78,7 @@ class RolloutBuffer:
         # For memory model - store hidden states
         self.hidden_states: torch.Tensor | None = None  # Will be set based on memory model
         self.latent_states: torch.Tensor | None = None  # z_t from vision encoder
+        self.next_latent_states: torch.Tensor | None = None  # z_{t+1} for memory training
 
         self.ptr = 0
         self.full = False
@@ -97,6 +98,7 @@ class RolloutBuffer:
         done: torch.Tensor,
         z_t: torch.Tensor | None = None,
         h_t: torch.Tensor | None = None,
+        z_next: torch.Tensor | None = None,
     ) -> None:
         """
         Add a transition to the buffer.
@@ -110,6 +112,7 @@ class RolloutBuffer:
             done: Done flags (num_envs,)
             z_t: Latent states from vision (num_envs, latent_dim)
             h_t: Hidden states from memory (num_envs, h_dim)
+            z_next: Next latent states for memory training (num_envs, latent_dim)
         """
         self.observations[self.ptr] = obs
         self.actions[self.ptr] = action
@@ -138,6 +141,16 @@ class RolloutBuffer:
                 )
             assert self.hidden_states is not None  # for type checker
             self.hidden_states[self.ptr] = h_t
+
+        if z_next is not None:
+            if self.next_latent_states is None:
+                self.next_latent_states = torch.zeros(
+                    (self.buffer_size, self.num_envs, z_next.shape[-1]),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            assert self.next_latent_states is not None  # for type checker
+            self.next_latent_states[self.ptr] = z_next
 
         self.ptr += 1
         if self.ptr == self.buffer_size:
@@ -213,10 +226,13 @@ class RolloutBuffer:
 
         flat_z = None
         flat_h = None
+        flat_z_next = None
         if self.latent_states is not None:
             flat_z = self.latent_states.view(total_size, -1)
         if self.hidden_states is not None:
             flat_h = self.hidden_states.view(total_size, -1)
+        if self.next_latent_states is not None:
+            flat_z_next = self.next_latent_states.view(total_size, -1)
 
         # Generate batches
         start_idx = 0
@@ -236,6 +252,8 @@ class RolloutBuffer:
                 batch["latent_states"] = flat_z[batch_indices]
             if flat_h is not None:
                 batch["hidden_states"] = flat_h[batch_indices]
+            if flat_z_next is not None:
+                batch["next_latent_states"] = flat_z_next[batch_indices]
 
             yield batch
             start_idx += batch_size

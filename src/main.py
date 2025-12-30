@@ -1,21 +1,21 @@
-from pathlib import Path
 import argparse
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import gymnasium as gym
 import torch
 
-import vision
-import memory
 import controller
+import memory
 import reward_predictor
+import vision
 from pretrain import pretrain
 from train import train
-from utils.registry import discover_modules
 from utils.cli import CLI
-from WorldModel import WorldModel
 from utils.gym_tools import gym_is_image_based
+from utils.registry import discover_modules
+from WorldModel import WorldModel
 
 VISION_REGISTRY: dict = discover_modules(vision)
 MEMORY_REGISTRY: dict = discover_modules(memory)
@@ -70,7 +70,7 @@ def main() -> None:
 
     parser.add_argument("--max-epoch", type=int, default=200)
     parser.add_argument("--patience", type=int, default=5)  # Unused yet, not in CLI.
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--env-batch-number", type=str, default="auto")
     parser.add_argument("--render-mode", type=str, default="rgb_array")
