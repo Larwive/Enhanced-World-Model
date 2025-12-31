@@ -114,8 +114,6 @@ def train(
 
     # Setup optimizers
     world_params = list(model.vision.parameters()) + list(model.memory.parameters())
-    if model.reward_predictor is not None:
-        world_params += list(model.reward_predictor.parameters())
 
     world_optimizer = torch.optim.Adam(world_params, lr=learning_rate)
     policy_optimizer = torch.optim.Adam(model.controller.parameters(), lr=policy_lr)

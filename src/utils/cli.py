@@ -30,11 +30,7 @@ def print_separator() -> None:
 
 
 def print_main_args(
-    args: Namespace,
-    vision_registry: dict,
-    _memory_registry: dict,
-    controller_registry: dict,
-    _reward_predictor_registry: dict,
+    args: Namespace, vision_registry: dict, _memory_registry: dict, controller_registry: dict
 ) -> None:
     print_separator()
     cli_printer.log("Main arguments:", style=Style.CYAN + Style.UNDERLINE)
@@ -68,7 +64,6 @@ def print_main_args(
         "  - Vision    ": str(args.vision) + vision_warning,
         "  - Memory    ": str(args.memory),
         "  - Controller": str(args.controller) + controller_warning,
-        "  - Reward predictor": str(args.reward_predictor),
         "  - Learning rate": str(args.learning_rate),
         "  - Batch size": str(args.env_batch_number),
         "  - Epochs": str(args.max_epoch),
@@ -82,11 +77,7 @@ def print_main_args(
 
 
 def edit_main_args(
-    args: Namespace,
-    vision_registry: dict,
-    memory_registry: dict,
-    controller_registry: dict,
-    reward_predictor_registry: dict,
+    args: Namespace, vision_registry: dict, memory_registry: dict, controller_registry: dict
 ) -> None:
     print_separator()
 
@@ -97,11 +88,10 @@ def edit_main_args(
             "  - 1: Vision": str(args.vision),
             "  - 2: Memory": str(args.memory),
             "  - 3: Controller": str(args.controller),
-            "  - 4: Reward predictor": str(args.reward_predictor),
-            "  - 5: Learning rate": str(args.learning_rate),
-            "  - 6: Batch size": str(args.env_batch_number),
-            "  - 7: Epochs": str(args.max_epoch),
-            "  - 8: Render mode": str(args.render_mode),
+            "  - 4: Learning rate": str(args.learning_rate),
+            "  - 5: Batch size": str(args.env_batch_number),
+            "  - 6: Epochs": str(args.max_epoch),
+            "  - 7: Render mode": str(args.render_mode),
             "  - 9: : Back ": "",
         }
         cli_printer.dict_log(main_edit_dict)
@@ -124,13 +114,10 @@ def edit_main_args(
                 else:
                     cli_printer.error("Invalid environment choice.")
                     continue
-            case "1" | "2" | "3" | "4":
-                registries = [
-                    vision_registry,
-                    memory_registry,
-                    controller_registry,
-                    reward_predictor_registry,
-                ][edit_choice - 1]
+            case "1" | "2" | "3":
+                registries = [vision_registry, memory_registry, controller_registry][
+                    edit_choice - 1
+                ]
 
                 models = {
                     f"{i}": f"{name}{Style.RESET} ([{Style.BLUE}{', '.join(cls.tags)}{Style.RESET}])"
@@ -144,7 +131,7 @@ def edit_main_args(
                     continue
                 model_id_choice = int(model_choice)
                 if 0 <= model_id_choice < len(registries):
-                    fields = ["vision", "memory", "controller", "reward_predictor"]
+                    fields = ["vision", "memory", "controller"]
 
                     setattr(args, fields[edit_choice - 1], list(registries.keys())[model_id_choice])
                 else:
@@ -152,7 +139,7 @@ def edit_main_args(
                         f"Invalid model choice. Enter a number between 0 and {len(registries) - 1}."
                     )
                     continue
-            case "5" | "6" | "7":
+            case "4" | "5" | "6":
                 value = cli_printer.input(
                     f"Enter new value for {['learning rate', 'batch size', 'number of epochs'][edit_choice - 5]}: "
                 )
@@ -170,7 +157,7 @@ def edit_main_args(
                 except ValueError:
                     cli_printer.error("Invalid value.")
                     continue
-            case "8":
+            case "7":
                 render_modes = {
                     "0": ("rgb_array", "RGB array (no render)"),
                     "1": ("human", "Human"),
@@ -301,18 +288,12 @@ def edit_advanced_args(args: Namespace) -> None:
 
 
 def CLI(
-    args: Namespace,
-    vision_registry: dict,
-    memory_registry: dict,
-    controller_registry: dict,
-    reward_predictor_registry: dict,
+    args: Namespace, vision_registry: dict, memory_registry: dict, controller_registry: dict
 ) -> None:
     cli_printer.log("Welcome to the Enhanced World Model CLI!", style=Style.GREEN + Style.BOLD)
     while True:
         print_separator()
-        print_main_args(
-            args, vision_registry, memory_registry, controller_registry, reward_predictor_registry
-        )
+        print_main_args(args, vision_registry, memory_registry, controller_registry)
         print_advanced_args(args)
 
         cli_printer.log("\nAvailable commands:", style=Style.CYAN + Style.UNDERLINE)
@@ -331,13 +312,7 @@ def CLI(
             case "0":
                 break
             case "1":
-                edit_main_args(
-                    args,
-                    vision_registry,
-                    memory_registry,
-                    controller_registry,
-                    reward_predictor_registry,
-                )
+                edit_main_args(args, vision_registry, memory_registry, controller_registry)
             case "2":
                 edit_advanced_args(args)
             case "7":

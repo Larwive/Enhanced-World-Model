@@ -8,7 +8,6 @@ import torch
 
 import controller
 import memory
-import reward_predictor
 import vision
 from pretrain import pretrain
 from train import train
@@ -20,7 +19,6 @@ from WorldModel import WorldModel
 VISION_REGISTRY: dict = discover_modules(vision)
 MEMORY_REGISTRY: dict = discover_modules(memory)
 CONTROLLER_REGISTRY: dict = discover_modules(controller)
-REWARD_PREDICTOR_REGISTRY: dict = discover_modules(reward_predictor)
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -66,7 +64,6 @@ def main() -> None:
     parser.add_argument("--vision", type=str, default="Identity")
     parser.add_argument("--memory", type=str, default="TemporalTransformer")
     parser.add_argument("--controller", type=str, default="DeepDiscreteController")
-    parser.add_argument("--reward-predictor", type=str, default="LinearPredictor")
 
     parser.add_argument("--max-epoch", type=int, default=200)
     parser.add_argument("--patience", type=int, default=5)  # Unused yet, not in CLI.
@@ -93,7 +90,7 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.cli:
-        CLI(args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY, REWARD_PREDICTOR_REGISTRY)
+        CLI(args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY)
     env_batch_size = int(args.env_batch_number) if args.env_batch_number.isdigit() else "auto"
     if env_batch_size == "auto":
         # TODO: Automatically determines the maximum size of the batch.
@@ -199,17 +196,11 @@ def main() -> None:
             controller_args=controller_args,
         ).to(device)
 
-        reward_predictor_model = REWARD_PREDICTOR_REGISTRY.get(args.reward_predictor, None)
-        if reward_predictor_model is None:
-            raise Exception(
-                f"Reward predictor model {args.reward_predictor} is not available.\nAvailable models: {list(REWARD_PREDICTOR_REGISTRY.keys())}"
-            )
-
-        world_model.set_reward_predictor(reward_predictor_model)
-
         if args.load_path:
             print(f"Loading model from {args.load_path}")
-            world_model.load(args.load_path, obs_space=obs_space, action_space=action_space)
+            world_model.load(
+                args.load_path, obs_space=obs_space, action_space=action_space, device=device
+            )
 
         if args.pretrain_vision or args.pretrain_memory:
             if not args.pretrain_vision:
@@ -222,10 +213,6 @@ def main() -> None:
 
             for param in world_model.controller.parameters():
                 param.requires_grad = False
-
-            if world_model.reward_predictor is not None:
-                for param in world_model.reward_predictor.parameters():
-                    param.requires_grad = False
 
             save_prefix = (
                 "" + ("V" if args.pretrain_vision else "") + ("M" if args.pretrain_memory else "")
