@@ -17,6 +17,8 @@ class LSTMMemory(MemoryModel):
     - Designed for sequential processing
     """
 
+    tags: list[str] = []
+
     def __init__(
         self,
         latent_dim: int = 4,
@@ -156,7 +158,7 @@ class LSTMMemory(MemoryModel):
     def reset_env_memory(self, env_idx: int) -> None:
         """Reset memory for a specific environment."""
         env_idx = int(env_idx)
-        if self.h_state is not None:
+        if self.h_state is not None and self.c_state is not None:
             self.h_state[:, env_idx] = 0
             self.c_state[:, env_idx] = 0
 
