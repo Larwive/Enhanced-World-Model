@@ -56,7 +56,7 @@ def main() -> None:
         help="Runs the command line interface.",
     )
     parser.add_argument(
-        "--env-name",
+        "--env",
         type=str,
         default="CarRacing-v3",
         help="The Gym environment to use.",
@@ -65,33 +65,80 @@ def main() -> None:
     parser.add_argument("--memory", type=str, default="TemporalTransformer")
     parser.add_argument("--controller", type=str, default="DeepDiscreteController")
 
-    parser.add_argument("--max-epoch", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--patience", type=int, default=5)  # Unused yet, not in CLI.
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--batch-size", type=str, default="auto")
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--env-batch-number", type=str, default="auto")
     parser.add_argument("--render-mode", type=str, default="rgb_array")
 
-    parser.add_argument("--random-seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save-path", default="./saved_models/")
     parser.add_argument("--load-path", default="")
-    parser.add_argument("--gpu", default="0")
+    parser.add_argument(
+        "--save-freq", type=int, default=10, help="Frequency of saving model checkpoints."
+    )
+    parser.add_argument(
+        "--log-freq", type=int, default=10, help="Frequency of logging training progress."
+    )
+    parser.add_argument("--tensorboard", action="store_true", help="Enable tensorboard logging.")
 
     # Pretraining args
+    parser.add_argument("--pretrain-vision", action="store_true")
+    parser.add_argument("--pretrain-memory", action="store_true")
+    parser.add_argument("--pretrain-mode", type=str, default="random", choices=["manual", "random"])
     parser.add_argument(
         "--manual-mode-delay",
         type=float,
         default=0.05,
         help="Delay between each step during manual training.",
     )
-    parser.add_argument("--pretrain-mode", type=str, default="random", choices=["manual", "random"])
-    parser.add_argument("--pretrain-vision", action="store_true")
-    parser.add_argument("--pretrain-memory", action="store_true")
 
+    # PPO arguments
+    parser.add_argument("--rollout-steps", type=int, default=128, help="Number of rollout steps.")
+    parser.add_argument(
+        "--ppo-epochs", type=int, default=4, help="Number of epochs for PPO training."
+    )
+    parser.add_argument(
+        "--ppo-lr", type=float, default=3e-4, help="Learning rate for PPO training."
+    )
+    parser.add_argument(
+        "--ppo-batch-size", type=int, default=64, help="Batch size for PPO training."
+    )
+    parser.add_argument(
+        "--ppo-clip-range", type=float, default=0.2, help="Clipping parameter for PPO training."
+    )
+    parser.add_argument(
+        "--ppo-range-vf", type=float, default=None, help="Value function for PPO training."
+    )
+    parser.add_argument(
+        "--gamma", type=float, default=0.99, help="Gamma parameter for GAE in PPO training."
+    )
+    parser.add_argument(
+        "--gae-lambda", type=float, default=0.95, help="Lambda parameter for GAE in PPO training."
+    )
+    parser.add_argument(
+        "--value-coef", type=float, default=0.5, help="Value loss coefficient in PPO training."
+    )
+    parser.add_argument(
+        "--entropy-coef", type=float, default=0.01, help="Entropy coefficient in PPO training."
+    )
+    parser.add_argument(
+        "--max-grad-norm", type=float, default=0.5, help="Maximum gradient norm in PPO training."
+    )
+    parser.add_argument(
+        "--no-train-world-model", action="store_true", help="Train the world model."
+    )
+    parser.add_argument(
+        "--world-model-epochs",
+        type=int,
+        default=1,
+        help="Number of epochs for world model training.",
+    )
     args = parser.parse_args()
     if args.cli:
         CLI(args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY)
-    env_batch_size = int(args.env_batch_number) if args.env_batch_number.isdigit() else "auto"
+    env_batch_size = int(args.batch_size) if args.batch_size.isdigit() else "auto"
     if env_batch_size == "auto":
         # TODO: Automatically determines the maximum size of the batch.
         env_batch_size = 2
@@ -120,13 +167,13 @@ def main() -> None:
             real_render_mode = "rgb_array"
 
         envs = gym.make_vec(
-            args.env_name, num_envs=env_batch_size, render_mode=real_render_mode
+            args.env, num_envs=env_batch_size, render_mode=real_render_mode
         )  # args.render_mode)
         obs_space = envs.single_observation_space
 
         obs_shape = obs_space.shape
         assert obs_shape is not None
-        is_image_based = gym_is_image_based(args.env_name)
+        is_image_based = gym_is_image_based(args.env)
 
         vision_model = VISION_REGISTRY.get(args.vision, None)
         if vision_model is None:
@@ -220,7 +267,7 @@ def main() -> None:
             pretrain(
                 world_model,
                 envs,
-                max_iter=args.max_epoch,
+                max_iter=args.epochs,
                 device=device,
                 learning_rate=args.learning_rate,
                 mode=args.pretrain_mode,
@@ -239,15 +286,31 @@ def main() -> None:
             train(
                 world_model,
                 envs,
-                max_iter=args.max_epoch,
+                max_iter=args.epochs,
                 device=device,
-                learning_rate=args.learning_rate,
+                rollout_steps=args.rollout_steps,
+                num_ppo_epochs=args.ppo_epochs,
+                batch_size=args.ppo_batch_size,
+                clip_range=args.ppo_clip_range,
+                clip_range_vf=args.ppo_range_vf,
+                gamma=args.gamma,
+                gae_lambda=args.gae_lambda,
+                learning_rate=args.lr,
+                policy_lr=args.ppo_lr,
+                value_coef=args.value_coef,
+                entropy_coef=args.entropy_coef,
+                max_grad_norm=args.max_grad_norm,
+                train_world_model=args.train_world_model,
+                world_model_epochs=args.world_model_epochs,
+                use_tensorboard=args.tensorboard,
                 save_path=Path(args.save_path),
+                save_freq=args.save_freq,
+                log_freq=args.log_freq,
                 render_mode=args.render_mode,
             )
 
             save_name = Path(
-                f"{args.save_path}{args.env_name}_{datetime.now().isoformat(timespec='minutes')}.pt"
+                f"{args.save_path}{args.env}_{datetime.now().isoformat(timespec='minutes')}.pt"
             )
             world_model.save(
                 save_name,
