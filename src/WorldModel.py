@@ -163,17 +163,17 @@ class WorldModel(Model):
 
         # === LOSSES ===
         # Vision loss depends on model type
-        if self.vision.is_reconstruction_based:
+        if "no_reconstruction" in self.vision.tags:
+            # JEPA: vq_loss already contains the full training loss (VICReg)
+            # No reconstruction loss since JEPA predicts in latent space
+            recon_loss = torch.zeros(input.shape[0], device=input.device)
+            total_loss = vq_loss.mean()
+        else:
             # VQ-VAE: compute reconstruction loss between recon and input
             recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(
                 dim=tuple(range(1, recon.dim()))
             )
             total_loss = recon_loss.mean() + vq_loss.mean()
-        else:
-            # JEPA: vq_loss already contains the full training loss (VICReg)
-            # No reconstruction loss since JEPA predicts in latent space
-            recon_loss = torch.zeros(input.shape[0], device=input.device)
-            total_loss = vq_loss.mean()
 
         outputs = {
             "memory_prediction": z_next_pred,  # (B, latent_dim) - prédiction de z_{t+1}

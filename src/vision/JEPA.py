@@ -110,8 +110,8 @@ class JEPA(VisionModel):
         - More sample efficient
     """
 
+    tags = ["image_based", "no_reconstruction"]
     # JEPA does NOT reconstruct pixels - it predicts in latent space
-    is_reconstruction_based: bool = False
 
     def __init__(
         self,
