@@ -20,9 +20,6 @@ class VisionModel(Model):
             or latent predictions (False for JEPA). Used to determine loss computation.
     """
 
-    # Override in subclasses. True for VQ_VAE, False for JEPA.
-    is_reconstruction_based: bool = True
-
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         REGISTRY[cls.__name__] = cls

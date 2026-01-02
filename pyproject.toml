@@ -31,7 +31,8 @@ dev = [
 ]
 
 [tool.uv]
-extra-index-url = ["https://download.pytorch.org/whl/nightly/cu130"]
+extra-index-url = []
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true

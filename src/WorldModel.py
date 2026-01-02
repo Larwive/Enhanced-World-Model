@@ -7,7 +7,6 @@ import torch
 
 import controller
 import memory
-import reward_predictor
 import vision
 from Model import Model
 from utils.registry import discover_modules
@@ -15,7 +14,6 @@ from utils.registry import discover_modules
 VISION_REGISTRY: dict = discover_modules(vision)
 MEMORY_REGISTRY: dict = discover_modules(memory)
 CONTROLLER_REGISTRY: dict = discover_modules(controller)
-REWARD_PREDICTOR_REGISTRY: dict = discover_modules(reward_predictor)
 
 
 def describe_action_space(space: Any) -> dict:
@@ -97,7 +95,6 @@ class WorldModel(Model):
             z_dim=self.vision.embed_dim, h_dim=controller_h_dim, **controller_args
         )
 
-        self.reward_predictor: reward_predictor.RewardPredictorModel | None = None
         self.a_prev = None
 
     def forward(
@@ -166,17 +163,17 @@ class WorldModel(Model):
 
         # === LOSSES ===
         # Vision loss depends on model type
-        if self.vision.is_reconstruction_based:
+        if "no_reconstruction" in self.vision.tags:
+            # JEPA: vq_loss already contains the full training loss (VICReg)
+            # No reconstruction loss since JEPA predicts in latent space
+            recon_loss = torch.zeros(input.shape[0], device=input.device)
+            total_loss = vq_loss.mean()
+        else:
             # VQ-VAE: compute reconstruction loss between recon and input
             recon_loss = torch.nn.functional.mse_loss(recon, input, reduction="none").mean(
                 dim=tuple(range(1, recon.dim()))
             )
             total_loss = recon_loss.mean() + vq_loss.mean()
-        else:
-            # JEPA: vq_loss already contains the full training loss (VICReg)
-            # No reconstruction loss since JEPA predicts in latent space
-            recon_loss = torch.zeros(input.shape[0], device=input.device)
-            total_loss = vq_loss.mean()
 
         outputs = {
             "memory_prediction": z_next_pred,  # (B, latent_dim) - prédiction de z_{t+1}
@@ -188,14 +185,6 @@ class WorldModel(Model):
             "log_probs": log_probs,
             "value": value,
         }
-
-        # === REWARD PREDICTOR ===
-        if self.reward_predictor and last_reward is not None:
-            outputs["predicted_reward"] = self.reward_predictor(
-                z_t,  # .detach().clone(),
-                h_t,
-                last_reward,
-            )
 
         return outputs
 
@@ -214,9 +203,6 @@ class WorldModel(Model):
             "controller_args": self.controller.export_hyperparams(),
         }
 
-        if self.reward_predictor is not None:
-            hyperparams_dict["reward_predictor_model"] = self.reward_predictor.__class__.__name__
-            hyperparams_dict["reward_predictor_args"] = self.reward_predictor.export_hyperparams()
         return hyperparams_dict
 
     def save(self, path: Path, obs_space: Any, action_space: Any) -> None:
@@ -236,10 +222,6 @@ class WorldModel(Model):
             "controller_dict": self.controller.save_state(),
         }
 
-        if self.reward_predictor is not None:
-            saving_dict["reward_predictor_model"] = self.reward_predictor.__class__.__name__
-            saving_dict["reward_predictor_args"] = self.reward_predictor.export_hyperparams()
-            saving_dict["reward_predictor_dict"] = self.reward_predictor.save_state()
         torch.save(saving_dict, path)
 
     def load(self, path: Path, obs_space: Any, action_space: Any, device: torch.device) -> None:
@@ -262,23 +244,6 @@ class WorldModel(Model):
             **saved_dict["controller_args"]
         )
         self.controller.load(saved_dict["controller_dict"])
-
-        if "reward_predictor_dict" in saved_dict:
-            rp = REWARD_PREDICTOR_REGISTRY[saved_dict["reward_predictor_model"]](
-                **saved_dict["reward_predictor_args"]
-            )
-            rp.load(saved_dict["reward_predictor_dict"])
-            self.reward_predictor = rp
-
-    def set_reward_predictor(
-        self,
-        reward_predictor_class: type[reward_predictor.RewardPredictorModel],
-        **kwargs: dict[str, Any],
-    ) -> None:
-        kwargs["z_dim"] = self.vision.embed_dim
-        kwargs["h_dim"] = self.memory_d_model
-        kwargs["action_dim"] = self.action_dim
-        self.reward_predictor = reward_predictor_class(**kwargs)
 
 
 def render_first_env(envs: Any, title: str = "") -> None:

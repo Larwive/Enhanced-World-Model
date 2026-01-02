@@ -62,18 +62,20 @@ The accepted arguments are:
 
 ### Environment & Training
 - `--env` to set the environment to use.
-- `--seed` to set the seed.
+- `--vision` to set the vision model to use. Loading an existing model will overwrite this argument.
+- `--memory` to set the memory model to use. Loading an existing model will overwrite this argument.
+- `--controller` to set the controller model to use. Loading an existing model will overwrite this argument.
+
 - `--epochs` to set the number of epochs to run.
 - `--patience` to set the number of iterations without noticeable improvement before early stopping.
 - `--batch-size` to set the number of environments to run in parallel. Can be set automatically with `auto`.
 - `--lr` the learning rate for the model, except the controller model.
 - `--dropout` to control the dropout rate.
 - `--render-mode` to set render mode between `human` and `rgb_array` (no render).
+
+- `--seed` to set the seed.
 - `--save-path` for the path to save the model.
 - `--load-path` to load an existing model.
-- `--vision` to set the vision model to use. Loading an existing model will overwrite this argument.
-- `--memory` to set the memory model to use. Loading an existing model will overwrite this argument.
-- `--controller` to set the controller model to use. Loading an existing model will overwrite this argument.
 - `--save-freq` the number of epochs between each save.
 - `--log-freq` the number of epochs between each log.
 - `--tensorboard` whether to log gradients and losses into TensorBoard.
@@ -92,14 +94,15 @@ Pretraining-specific arguments:
 - `--pretrain-vision`
 - `--pretrain-memory`
 - `--pretrain-mode` (`random` or `manual`)
+- `--manual-mode-delay` to set the delay between each step during manual pretraining.
 
 ## PPO Configuration
 
 The controller is trained using Proximal Policy Optimization (PPO).
 The following arguments control the PPO training process:
 - `--rollout-steps` the number of rollout steps.
-- `--ppo-lr` for the PPO learning rate.
 - `--ppo-epochs` the number of PPO epochs.
+- `--ppo-lr` for the PPO learning rate.
 - `--ppo-batch-size` the batch size for PPO updates by batch.
 - `--ppo-clip-range` the interval for PPO gradient clipping.
 - `--ppo-range-vf` the value function for PPO gradient clipping.
