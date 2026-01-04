@@ -9,12 +9,12 @@ import torch
 import controller
 import memory
 import vision
+from inference import evaluate
 from pretrain import pretrain
 from train import train
 from utils.cli import CLI
-from utils.gym_tools import gym_is_image_based
 from utils.registry import discover_modules
-from WorldModel import WorldModel
+from utils.model import create_world_model
 
 VISION_REGISTRY: dict = discover_modules(vision)
 MEMORY_REGISTRY: dict = discover_modules(memory)
@@ -58,7 +58,7 @@ def main() -> None:
     parser.add_argument(
         "--env",
         type=str,
-        default="CarRacing-v3",
+        default="CartPole-v1",  # "CarRacing-v3",
         help="The Gym environment to use.",
     )  # CartPole-v1
     parser.add_argument("--vision", type=str, default="Identity")
@@ -135,6 +135,11 @@ def main() -> None:
         default=1,
         help="Number of epochs for world model training.",
     )
+
+    # Inference arguments
+    parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to run.")
+    parser.add_argument("--infer", action="store_true", help="Enable inference mode.")
+
     args = parser.parse_args()
     if args.cli:
         CLI(args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY)
@@ -157,9 +162,6 @@ def main() -> None:
     logger.info(f"Using device: {device}")
 
     try:
-        if args.pretrain_vision and args.pretrain_mode == "manual":
-            args.render_mode = "rgb_array"  # "human"
-
         real_render_mode = args.render_mode
         if (
             args.render_mode == "human"
@@ -169,79 +171,23 @@ def main() -> None:
         envs = gym.make_vec(
             args.env, num_envs=env_batch_size, render_mode=real_render_mode
         )  # args.render_mode)
-        obs_space = envs.single_observation_space
 
-        obs_shape = obs_space.shape
-        assert obs_shape is not None
-        is_image_based = gym_is_image_based(args.env)
+        world_model, obs_space, action_space, log_messages = create_world_model(
+            args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY, device
+        )
 
-        vision_model = VISION_REGISTRY.get(args.vision, None)
-        if vision_model is None:
-            raise Exception(
-                f"Vision model {args.vision} is not available.\nAvailable models: {list(VISION_REGISTRY.keys())}"
-            )
+        for info_message in log_messages["info"]:
+            logger.info(info_message)
 
-        if is_image_based:
-            logger.info("Detected image-based environment.")
-            # (H, W, C) -> (C, H, W)
-            input_shape = (obs_shape[2], obs_shape[0], obs_shape[1])
-            vision_args = {"output_dim": input_shape[0], "embed_dim": 64}
-            if "image_based" not in vision_model.tags:
-                logger.warning(f"Vision model {args.vision} is not image-based.")
-        else:
-            logger.info("Detected vector-based environment.")
-            input_shape = obs_shape
-            vision_args = {"embed_dim": obs_shape[0]}
-            if "vector_based" not in vision_model.tags:
-                logger.warning(f"Vision model {args.vision} is not vector-based.")
+        for warning_message in log_messages["warning"]:
+            logger.warning(warning_message)
 
-        memory_model = MEMORY_REGISTRY.get(args.memory, None)
-        if memory_model is None:
-            raise Exception(
-                f"Memory model {args.memory} is not available.\nAvailable models: {list(MEMORY_REGISTRY.keys())}"
-            )
+        for error_message in log_messages["error"]:
+            logger.error(error_message)
 
-        # Configure memory and controller based on environment
-        controller_model = CONTROLLER_REGISTRY.get(args.controller, None)
-        if controller_model is None:
-            raise Exception(
-                f"Controller model {args.controller} is not available.\nAvailable models: {list(CONTROLLER_REGISTRY.keys())}"
-            )
-        action_space = envs.single_action_space
-        if isinstance(action_space, gym.spaces.Discrete):
-            action_dim = action_space.n  # action_space.n is actually the number of possible values
-            if "discrete" not in controller_model.tags:
-                logger.warning(
-                    f"Controller model {args.controller} is not suitable for discrete action space."
-                )
-        else:  # Box, etc.
-            assert action_space.shape
-            action_dim = action_space.shape[0]
-            if "continuous" not in controller_model.tags:
-                logger.warning(
-                    f"Controller model {args.controller} is not suitable for continuous action space."
-                )
-
-        memory_args = {
-            "d_model": 128,
-            "latent_dim": vision_args["embed_dim"],
-            "action_dim": action_dim,
-            "nhead": 8,
-        }
-        controller_args = {"action_dim": action_dim}
-        logger.info(f"Vision model: {vision_model}")
-        logger.info(f"Memory model: {memory_model}")
-        logger.info(f"Controller model: {controller_model}")
-
-        world_model = WorldModel(
-            vision_model=vision_model,
-            memory_model=memory_model,
-            controller_model=controller_model,  # StochasticController,  #ModelPredictiveController,
-            input_shape=input_shape,
-            vision_args=vision_args,
-            memory_args=memory_args,
-            controller_args=controller_args,
-        ).to(device)
+        logger.info(f"Vision model: {world_model.vision.__class__.__name__}")
+        logger.info(f"Memory model: {world_model.memory.__class__.__name__}")
+        logger.info(f"Controller model: {world_model.controller.__class__.__name__}")
 
         if args.load_path:
             print(f"Loading model from {args.load_path}")
@@ -249,7 +195,12 @@ def main() -> None:
                 args.load_path, obs_space=obs_space, action_space=action_space, device=device
             )
 
-        if args.pretrain_vision or args.pretrain_memory:
+        if args.infer:
+            world_model.eval()
+            evaluate(
+                world_model, args.env, num_episodes=args.episodes, render_mode=args.render_mode
+            )
+        elif args.pretrain_vision or args.pretrain_memory:
             if not args.pretrain_vision:
                 for param in world_model.vision.parameters():
                     param.requires_grad = False
@@ -300,7 +251,7 @@ def main() -> None:
                 value_coef=args.value_coef,
                 entropy_coef=args.entropy_coef,
                 max_grad_norm=args.max_grad_norm,
-                train_world_model=args.train_world_model,
+                train_world_model=not args.no_train_world_model,
                 world_model_epochs=args.world_model_epochs,
                 use_tensorboard=args.tensorboard,
                 save_path=Path(args.save_path),
