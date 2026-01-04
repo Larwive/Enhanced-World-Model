@@ -1,17 +1,12 @@
-import logging
-from collections.abc import Callable
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
 import torch
-from torch.nn import MSELoss
 
-import controller
-import memory
 import vision
+import memory
+import controller
 from utils.registry import discover_modules
 from WorldModel import WorldModel
 
@@ -49,7 +44,7 @@ def evaluate(
     for ep in range(num_episodes):
         obs, _ = env.reset()
         done = False
-        total_reward = 0
+        total_reward = 0.0
         steps = 0
         frames = []
 
@@ -74,7 +69,7 @@ def evaluate(
 
             obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            total_reward += int(reward)
+            total_reward += float(reward)
             steps += 1
 
             if steps % 10 == 0:
@@ -90,7 +85,6 @@ def evaluate(
     return results
 
 
-# Run evaluation
 if __name__ == "__main__":
     import argparse
 
