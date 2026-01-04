@@ -2,13 +2,32 @@ import json
 import os
 from argparse import Namespace
 from collections.abc import Callable
+import torch
 
-from utils.gym_tools import action_space_is_discrete, get_all_gym_envs, gym_is_image_based
+from utils.gym_tools import get_all_gym_envs, get_env_info
 from utils.logger import Logger, Style
+from utils.model import create_world_model
+from WorldModel import WorldModel
 
 cli_printer = Logger()
 
 bool_state = ["Disabled", "Enabled"]
+
+model = None
+
+
+def create_model_from_args(
+    args: Namespace, vision_registry: dict, memory_registry: dict, controller_registry: dict
+) -> WorldModel:
+    model, obs_space, action_space, _ = create_world_model(
+        args, vision_registry, memory_registry, controller_registry, torch.device("cpu")
+    )
+    cli_printer.log(f"Loading model from {args.load_path}")
+    model.load(
+        args.load_path, obs_space=obs_space, action_space=action_space, device=torch.device("cpu")
+    )
+    assert isinstance(model, WorldModel)
+    return model
 
 
 def save_args(args: Namespace) -> None:
@@ -27,8 +46,56 @@ def load_args(args: Namespace) -> None:
     cli_printer.log("Arguments loaded successfully.", style=Style.CYAN + Style.INVERT)
 
 
+def edit_env(args: Namespace) -> None:
+    env_names = get_all_gym_envs()
+    env_listing = {f"{i}": name for i, name in enumerate(env_names)}
+
+    cli_printer.log("Available envs:")
+    cli_printer.dict_log(env_listing, value_style=Style.MAGENTA)
+    env_id = cli_printer.input("Enter environment id: ")
+    if env_id.isdigit() and 0 <= int(env_id) < len(env_names):
+        args.env = env_names[int(env_id)]
+    else:
+        cli_printer.error("Invalid environment choice.")
+
+
 def print_separator() -> None:
     cli_printer.log("------------------------------------------------", style=Style.YELLOW)
+
+
+def get_model_warnings(
+    env: str,
+    vision_model: str,
+    _memory_model: str,
+    controller_model: str,
+    vision_registry: dict,
+    _memory_registry: dict,
+    controller_registry: dict,
+) -> tuple[str, str]:
+    _, _, is_image_based, is_discrete = get_env_info(env)
+    if is_image_based and "image_based" not in vision_registry[vision_model].tags:
+        vision_warning = (
+            f"{Style.RED} Warning: The selected vision model is not image-based.{Style.RESET}"
+        )
+    elif not is_image_based and "image_based" in vision_registry[vision_model].tags:
+        vision_warning = (
+            f"{Style.RED} Warning: The selected vision model is image-based.{Style.RESET}"
+        )
+    else:
+        vision_warning = ""
+
+    if is_discrete and "continuous" in controller_registry[controller_model].tags:
+        controller_warning = (
+            f"{Style.RED} Warning: The selected controller is continuous.{Style.RESET}"
+        )
+    elif not is_discrete and "discrete" in controller_registry[controller_model].tags:
+        controller_warning = (
+            f"{Style.RED} Warning: The selected controller is discrete.{Style.RESET}"
+        )
+    else:
+        controller_warning = ""
+
+    return vision_warning, controller_warning
 
 
 def print_main_args(
@@ -37,29 +104,26 @@ def print_main_args(
     print_separator()
     cli_printer.log("Main arguments:", style=Style.CYAN + Style.UNDERLINE)
 
-    is_image_based = gym_is_image_based(args.env)
-    if is_image_based and "image_based" not in vision_registry[args.vision].tags:
-        vision_warning = (
-            f"{Style.RED} Warning: The selected vision model is not image-based.{Style.RESET}"
-        )
-    elif not is_image_based and "image_based" in vision_registry[args.vision].tags:
-        vision_warning = (
-            f"{Style.RED} Warning: The selected vision model is image-based.{Style.RESET}"
-        )
-    else:
-        vision_warning = ""
-
-    is_discrete = action_space_is_discrete(args.env)
-    if is_discrete and "continuous" in controller_registry[args.controller].tags:
-        controller_warning = (
-            f"{Style.RED} Warning: The selected controller is continuous.{Style.RESET}"
-        )
-    elif not is_discrete and "discrete" in controller_registry[args.controller].tags:
-        controller_warning = (
-            f"{Style.RED} Warning: The selected controller is discrete.{Style.RESET}"
+    if model:
+        vision_warning, controller_warning = get_model_warnings(
+            args.env,
+            model.vision.__class__.__name__,
+            model.memory.__class__.__name__,
+            model.controller.__class__.__name__,
+            vision_registry,
+            _memory_registry,
+            controller_registry,
         )
     else:
-        controller_warning = ""
+        vision_warning, controller_warning = get_model_warnings(
+            args.env,
+            args.vision,
+            args.memory,
+            args.controller,
+            vision_registry,
+            _memory_registry,
+            controller_registry,
+        )
 
     main_dict = {
         "  Env": str(args.env),
@@ -73,6 +137,19 @@ def print_main_args(
         "  - Dropout": str(args.dropout),
         "  - Render mode": str(args.render_mode),
     }
+
+    if model:
+        main_dict["  - Vision    "] = (
+            model.vision.__class__.__name__ + vision_warning + f" {Style.RED_BG}From loaded model."
+        )
+        main_dict["  - Memory    "] = (
+            model.memory.__class__.__name__ + f" {Style.RED_BG}From loaded model."
+        )
+        main_dict["  - Controller"] = (
+            model.controller.__class__.__name__
+            + controller_warning
+            + f" {Style.RED_BG}From loaded model."
+        )
 
     cli_printer.dict_log(main_dict)
 
@@ -100,23 +177,24 @@ def edit_main_args(
             "  - 9: Render mode": str(args.render_mode),
             "  - x: : Back ": "",
         }
+
+        if model:
+            main_edit_dict["  - 1: Vision"] = (
+                model.vision.__class__.__name__ + f" {Style.RED_BG}From loaded model."
+            )
+            main_edit_dict["  - 2: Memory"] = (
+                model.memory.__class__.__name__ + f" {Style.RED_BG}From loaded model."
+            )
+            main_edit_dict["  - 3: Controller"] = (
+                model.controller.__class__.__name__ + f" {Style.RED_BG}From loaded model."
+            )
         cli_printer.dict_log(main_edit_dict)
 
         command = cli_printer.input("What to edit ? ")
 
         match command:
             case "0":
-                env_names = get_all_gym_envs()
-                env_listing = {f"{i}": name for i, name in enumerate(env_names)}
-
-                cli_printer.log("Available envs:")
-                cli_printer.dict_log(env_listing, value_style=Style.MAGENTA)
-                env_id = cli_printer.input("Enter environment id: ")
-                if env_id.isdigit() and 0 <= int(env_id) < len(env_names):
-                    args.env = env_names[int(env_id)]
-                else:
-                    cli_printer.error("Invalid environment choice.")
-                    continue
+                edit_env(args)
             case "1" | "2" | "3":
                 edit_choice = int(command)
                 registries = [vision_registry, memory_registry, controller_registry][
@@ -142,7 +220,6 @@ def edit_main_args(
                     cli_printer.error(
                         f"Invalid model choice. Enter a number between 0 and {len(registries) - 1}."
                     )
-                    continue
             case "4" | "5" | "6" | "7" | "8":
                 edit_choice = int(command)
                 value = cli_printer.input(
@@ -167,7 +244,6 @@ def edit_main_args(
                     setattr(args, fields[edit_choice - 4], value_object)
                 except ValueError:
                     cli_printer.error("Invalid value.")
-                    continue
             case "9":
                 render_modes = {
                     "0": ("rgb_array", "RGB array (no render)"),
@@ -182,7 +258,6 @@ def edit_main_args(
                     args.render_mode = render_modes[value][0]
                 else:
                     cli_printer.error("Invalid render choice.")
-                    continue
             case "x":
                 break
             case _:
@@ -216,7 +291,10 @@ def print_advanced_args(args: Namespace) -> None:
     cli_printer.log(f"\n  State: {Style.MAGENTA}{state}", style=Style.CYAN)
 
 
-def edit_advanced_args(args: Namespace) -> None:
+def edit_advanced_args(
+    args: Namespace, vision_registry: dict, memory_registry: dict, controller_registry: dict
+) -> None:
+    global model
     print_separator()
 
     while True:
@@ -241,10 +319,9 @@ def edit_advanced_args(args: Namespace) -> None:
             case "0":
                 new_seed = cli_printer.input("Enter new seed: ")
                 if new_seed.isdigit():
-                    args.random_seed = int(new_seed)
+                    args.seed = int(new_seed)
                 else:
                     cli_printer.error("Invalid seed value.")
-                    continue
 
             # No path autocompletion to not add dependencies for now. Only checking if paths exist.
             case "1":
@@ -253,28 +330,28 @@ def edit_advanced_args(args: Namespace) -> None:
                     args.save_path = save_path
                 else:
                     cli_printer.error("Invalid path.")
-                    continue
             case "2":
                 load_path = cli_printer.input("Enter path to load model: ")
                 if load_path and os.path.exists(load_path):
                     args.load_path = load_path
+                    model = create_model_from_args(
+                        args, vision_registry, memory_registry, controller_registry
+                    )
+
                 else:
                     cli_printer.error("Invalid path.")
-                    continue
             case "3":
                 save_freq = cli_printer.input("Enter save frequency: ")
                 if save_freq.isdigit() and int(save_freq) >= 0:
                     args.save_freq = int(save_freq)
                 else:
                     cli_printer.error("Invalid value.")
-                    continue
             case "4":
                 log_freq = cli_printer.input("Enter log frequency: ")
                 if log_freq.isdigit() and int(log_freq) >= 0:
                     args.log_freq = int(log_freq)
                 else:
                     cli_printer.error("Invalid value.")
-                    continue
             case "5":
                 use_tensorboard = cli_printer.input("Use tensorboard? (y/n): ")
                 if use_tensorboard.lower() == "y":
@@ -283,7 +360,6 @@ def edit_advanced_args(args: Namespace) -> None:
                     args.tensorboard = False
                 else:
                     cli_printer.error("Invalid input.")
-                    continue
             case "6":
                 pretrain_vision = cli_printer.input("Pretrain vision model? (y/n): ")
                 if pretrain_vision.lower() == "y":
@@ -292,7 +368,6 @@ def edit_advanced_args(args: Namespace) -> None:
                     args.pretrain_vision = False
                 else:
                     cli_printer.error("Invalid input.")
-                    continue
             case "7":
                 pretrain_memory = cli_printer.input("Pretrain memory model? (y/n): ")
                 if pretrain_memory.lower() == "y":
@@ -301,7 +376,6 @@ def edit_advanced_args(args: Namespace) -> None:
                     args.pretrain_memory = False
                 else:
                     cli_printer.error("Invalid input.")
-                    continue
             case "8":
                 pretrain_dict = {"  - 0: ": "Random", "  - 1: ": "Manual"}
                 cli_printer.dict_log(pretrain_dict)
@@ -311,7 +385,6 @@ def edit_advanced_args(args: Namespace) -> None:
                     args.pretrain_mode = modes[int(value)]
                 else:
                     cli_printer.error("Invalid mode choice.")
-                    continue
             case "x":
                 break
             case _:
@@ -389,9 +462,9 @@ def edit_ppo_args(args: Namespace) -> None:
                     "Train world model (vision and memory)? (y/n): "
                 )
                 if train_world_model.lower() == "y":
-                    args.no_train_world_model = True
-                elif train_world_model.lower() == "n":
                     args.no_train_world_model = False
+                elif train_world_model.lower() == "n":
+                    args.no_train_world_model = True
                 else:
                     cli_printer.error("Invalid input.")
                     continue
@@ -408,42 +481,204 @@ def edit_ppo_args(args: Namespace) -> None:
                 cli_printer.error("Invalid command.")
 
 
+def print_inference_args(
+    args: Namespace, vision_registry: dict, _memory_registry: dict, controller_registry: dict
+) -> None:
+    print_separator()
+    cli_printer.log("Inference mode arguments:", style=Style.CYAN + Style.UNDERLINE)
+    cli_printer.log(f"Loaded model: {args.load_path}")
+    if not args.load_path:
+        cli_printer.error("No model loaded. Please set a model to load.")
+    if model:
+        vision_warning, controller_warning = get_model_warnings(
+            args.env,
+            model.vision.__class__.__name__,
+            model.memory.__class__.__name__,
+            model.controller.__class__.__name__,
+            vision_registry,
+            _memory_registry,
+            controller_registry,
+        )
+    else:
+        vision_warning, controller_warning = "", ""
+    infer_dict = {
+        "  Env": str(args.env),
+        "  - Vision    ": "Empty",
+        "  - Memory    ": "Empty",
+        "  - Controller": "Empty",
+        "  - Model path": str(args.load_path),
+        "  - Episodes": str(args.episodes),
+        "  - Render mode": str(args.render_mode),
+    }
+    if model:
+        infer_dict["  - Vision    "] = str(model.vision.__class__.__name__) + vision_warning
+        infer_dict["  - Memory    "] = str(model.memory.__class__.__name__)
+        infer_dict["  - Controller"] = str(model.controller.__class__.__name__) + controller_warning
+
+    cli_printer.dict_log(infer_dict)
+
+
+def edit_inference_args(
+    args: Namespace, vision_registry: dict, memory_registry: dict, controller_registry: dict
+) -> None:
+    global model
+    if model:
+        vision_warning, controller_warning = get_model_warnings(
+            args.env,
+            model.vision.__class__.__name__,
+            model.memory.__class__.__name__,
+            model.controller.__class__.__name__,
+            vision_registry,
+            memory_registry,
+            controller_registry,
+        )
+    else:
+        vision_warning, controller_warning = "", ""
+    while True:
+        print_separator()
+        cli_printer.log("\nEditing main configuration:", style=Style.CYAN + Style.INVERT)
+        infer_dict = {
+            "  Vision": "Empty",
+            "  Memory": "Empty",
+            "  Controller": "Empty",
+            "  - 0: Environment": str(args.env),
+            "  - 1: Loaded model": str(args.load_path),
+            "  - 2: Episodes": str(args.episodes),
+            "  - 3: Render mode": str(args.render_mode),
+            "  - x: : Back ": "",
+        }
+
+        if model:
+            infer_dict["  Vision"] = str(model.vision.__class__.__name__) + vision_warning
+            infer_dict["  Memory"] = str(model.memory.__class__.__name__)
+            infer_dict["  Controller"] = (
+                str(model.controller.__class__.__name__) + controller_warning
+            )
+
+        cli_printer.dict_log(infer_dict)
+
+        command = cli_printer.input("What to edit ? ")
+
+        match command:
+            case "0":
+                edit_env(args)
+            case "1":
+                load_path = cli_printer.input("Enter path to load model: ")
+                if load_path and os.path.exists(load_path):
+                    args.load_path = load_path
+                    model = create_model_from_args(
+                        args, vision_registry, memory_registry, controller_registry
+                    )
+                else:
+                    cli_printer.error("Invalid path.")
+            case "2":
+                value = cli_printer.input("Enter new value for number of episodes: ")
+
+                if value.isdigit():
+                    args.episodes = int(value)
+                else:
+                    cli_printer.error("Invalid value.")
+            case "3":
+                render_modes = {
+                    "0": ("rgb_array", "RGB array (no render)"),
+                    "1": ("human", "Human"),
+                }
+                for key, (_, description) in render_modes.items():
+                    cli_printer.log(f"  - {key}: {Style.YELLOW}{description}")
+
+                value = cli_printer.input("Choose new render mode: ")
+
+                if value in render_modes:
+                    args.render_mode = render_modes[value][0]
+                else:
+                    cli_printer.error("Invalid render choice.")
+            case "x":
+                break
+            case _:
+                cli_printer.error("Invalid command.")
+
+
 def CLI(
     args: Namespace, vision_registry: dict, memory_registry: dict, controller_registry: dict
 ) -> None:
+    global model
     cli_printer.log("Welcome to the Enhanced World Model CLI!", style=Style.GREEN + Style.BOLD)
+    if args.load_path:
+        model = create_model_from_args(args, vision_registry, memory_registry, controller_registry)
     while True:
         print_separator()
-        print_main_args(args, vision_registry, memory_registry, controller_registry)
-        print_advanced_args(args)
 
-        cli_printer.log("\nAvailable commands:", style=Style.CYAN + Style.UNDERLINE)
-        command_dict = {
-            "  - 0": "Run",
-            "  - 1": "Edit main arguments",
-            "  - 2": "Edit advanced arguments",
-            "  - 3": "See PPO arguments.",
-            "  - 7": "Save args",
-            "  - 8": "Load saved args",
-            "  - exit": "Exit",
-        }
-        cli_printer.dict_log(command_dict, value_style=Style.MAGENTA)
+        if args.infer:
+            print_inference_args(args, vision_registry, memory_registry, controller_registry)
 
-        command = cli_printer.input("Enter command: ")
-        match command:
-            case "0":
-                break
-            case "1":
-                edit_main_args(args, vision_registry, memory_registry, controller_registry)
-            case "2":
-                edit_advanced_args(args)
-            case "3":
-                edit_ppo_args(args)
-            case "7":
-                save_args(args)
-            case "8":
-                load_args(args)
-            case "exit" | "x":
-                exit(0)
-            case _:
-                cli_printer.error("Invalid command.")
+            cli_printer.log("\nAvailable commands:", style=Style.CYAN + Style.UNDERLINE)
+            command_dict = {
+                "  - 0": "Run",
+                "  - 1": "Edit arguments",
+                "  - 2": "Switch to training mode",
+                "  - 7": "Save args",
+                "  - 8": "Load saved args",
+                "  - exit": "Exit",
+            }
+            cli_printer.dict_log(command_dict, value_style=Style.MAGENTA)
+
+            command = cli_printer.input("Enter command: ")
+            match command:
+                case "0":
+                    if model:
+                        break
+                    else:
+                        cli_printer.error("No model loaded. Please load a model first.")
+                case "1":
+                    edit_inference_args(args, vision_registry, memory_registry, controller_registry)
+                case "2":
+                    args.infer = False
+                case "7":
+                    save_args(args)
+                case "8":
+                    load_args(args)
+                    if args.load_path:
+                        model = create_model_from_args(
+                            args, vision_registry, memory_registry, controller_registry
+                        )
+                case "exit" | "x":
+                    exit(0)
+                case _:
+                    cli_printer.error("Invalid command.")
+        else:
+            print_main_args(args, vision_registry, memory_registry, controller_registry)
+            print_advanced_args(args)
+
+            cli_printer.log("\nAvailable commands:", style=Style.CYAN + Style.UNDERLINE)
+            command_dict = {
+                "  - 0": "Run",
+                "  - 1": "Edit main arguments",
+                "  - 2": "Edit advanced arguments",
+                "  - 3": "See PPO arguments",
+                "  - 4": "Switch to inference mode",
+                "  - 7": "Save args",
+                "  - 8": "Load saved args",
+                "  - exit": "Exit",
+            }
+            cli_printer.dict_log(command_dict, value_style=Style.MAGENTA)
+
+            command = cli_printer.input("Enter command: ")
+            match command:
+                case "0":
+                    break
+                case "1":
+                    edit_main_args(args, vision_registry, memory_registry, controller_registry)
+                case "2":
+                    edit_advanced_args(args, vision_registry, memory_registry, controller_registry)
+                case "3":
+                    edit_ppo_args(args)
+                case "4":
+                    args.infer = True
+                case "7":
+                    save_args(args)
+                case "8":
+                    load_args(args)
+                case "exit" | "x":
+                    exit(0)
+                case _:
+                    cli_printer.error("Invalid command.")
