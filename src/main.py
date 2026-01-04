@@ -22,7 +22,7 @@ CONTROLLER_REGISTRY: dict = discover_modules(controller)
 
 torch.autograd.set_detect_anomaly(True)
 
-device = (
+device: torch.device = (
     torch.device("mps")
     if torch.backends.mps.is_available()
     else torch.device("cuda")
@@ -174,18 +174,22 @@ def main() -> None:
             args.env, num_envs=env_batch_size, render_mode=real_render_mode
         )  # args.render_mode)
 
-        world_model, obs_space, action_space, log_messages = create_world_model(
-            args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY, device
-        )
+        try:
+            log_messages: dict[str, list[str]] = {"info": [], "warning": [], "error": []}
+            world_model, obs_space, action_space, log_messages = create_world_model(
+                args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY, device, log_messages
+            )
+        except Exception as e:
+            raise e
+        finally:
+            for info_message in log_messages["info"]:
+                logger.info(info_message)
 
-        for info_message in log_messages["info"]:
-            logger.info(info_message)
+            for warning_message in log_messages["warning"]:
+                logger.warning(warning_message)
 
-        for warning_message in log_messages["warning"]:
-            logger.warning(warning_message)
-
-        for error_message in log_messages["error"]:
-            logger.error(error_message)
+            for error_message in log_messages["error"]:
+                logger.error(error_message)
 
         logger.info(f"Vision model: {world_model.vision.__class__.__name__}")
         logger.info(f"Memory model: {world_model.memory.__class__.__name__}")

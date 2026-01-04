@@ -14,8 +14,13 @@ def create_world_model(
     memory_registry: dict,
     controller_registry: dict,
     device: torch.device,
+    messages: dict[str, list[str]] | None = None,
 ) -> tuple[WorldModel, Space, Space, dict[str, list[str]]]:
-    log_messages: dict[str, list[str]] = {"info": [], "warning": [], "error": []}
+    # Useful to allow passing local variables.
+    if messages is None:
+        log_messages: dict[str, list[str]] = {"info": [], "warning": [], "error": []}
+    else:
+        log_messages = messages
 
     if args.pretrain_vision and args.pretrain_mode == "manual":
         args.render_mode = "rgb_array"  # "human"
