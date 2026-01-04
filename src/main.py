@@ -162,6 +162,8 @@ def main() -> None:
     logger.info(f"Using device: {device}")
 
     try:
+        if args.pretrain_vision and args.pretrain_mode == "manual":
+            args.render_mode = "rgb_array"  # "human"
         real_render_mode = args.render_mode
         if (
             args.render_mode == "human"
