@@ -228,9 +228,11 @@ class WorldModel(Model):
         # TODO: Check input/output shape consistencies between components before loading the weights ?
         saved_dict = torch.load(path, weights_only=False, map_location=device)
 
-        assert (
-            obs_space == saved_dict["obs_space"] and action_space == saved_dict["action_space"]
-        ), "Observation space and/or action space of the saved model do not match those of the current environment."
+        if saved_dict["obs_space"] != obs_space or saved_dict["action_space"] != action_space:
+            print(
+                "Observation space and/or action space of the saved model do not match those of the current environment."
+            )
+
         self.iter_num = saved_dict["iter_num"]
         self.nb_experiments = saved_dict["nb_experiments"]
 
