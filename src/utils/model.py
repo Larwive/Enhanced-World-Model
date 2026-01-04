@@ -2,7 +2,7 @@ from argparse import Namespace
 
 import gymnasium as gym
 from gymnasium.spaces import Space
-import torch.device as torch_device
+import torch
 
 from WorldModel import WorldModel
 from utils.gym_tools import get_env_info
@@ -13,7 +13,7 @@ def create_world_model(
     vision_registry: dict,
     memory_registry: dict,
     controller_registry: dict,
-    device: torch_device,
+    device: torch.device,
 ) -> tuple[WorldModel, Space, Space, dict[str, list[str]]]:
     log_messages: dict[str, list[str]] = {"info": [], "warning": [], "error": []}
 
