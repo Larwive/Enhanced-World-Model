@@ -1,5 +1,6 @@
 import gymnasium as gym
 from gymnasium.envs.registration import registry
+from gymnasium.spaces import Space
 
 
 def get_all_gym_envs() -> list:
@@ -8,18 +9,13 @@ def get_all_gym_envs() -> list:
     return [env for env in all_envs if not env.startswith("_")]
 
 
-def action_space_is_discrete(env_name: str) -> bool:
-    """Returns True if the action space of the environment is discrete."""
+def get_env_info(env_name: str) -> tuple[Space, Space, bool, bool]:
+    """Returns information about the environment."""
     env = gym.make(env_name)
-    is_discrete = isinstance(env.action_space, gym.spaces.Discrete)
+    observation_space = env.observation_space
+    action_space = env.action_space
+    assert observation_space.shape is not None
+    is_image_based = len(observation_space.shape) == 3
+    is_discrete = isinstance(action_space, gym.spaces.Discrete)
     env.close()
-    return is_discrete
-
-
-def gym_is_image_based(env_name: str) -> bool:
-    """Returns True if the observation space of the environment is image-based."""
-    env = gym.make(env_name)
-    assert env.observation_space.shape is not None
-    is_image_based = len(env.observation_space.shape) == 3
-    env.close()
-    return is_image_based
+    return observation_space, action_space, is_image_based, is_discrete
