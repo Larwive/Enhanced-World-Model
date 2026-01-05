@@ -183,7 +183,7 @@ class VQ_VAE(VisionModel):
         self.stride = stride
 
         nb_channels = input_shape[0]
-        assert len(input_shape) == 3, "This version supports 2D inputs only (e.g. images)"
+        # assert len(input_shape) == 3, "This version supports 2D inputs only (e.g. images)"
 
         self.encoder = torch.nn.Sequential(
             torch.nn.Conv2d(

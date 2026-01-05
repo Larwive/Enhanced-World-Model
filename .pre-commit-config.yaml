@@ -33,3 +33,11 @@ repos:
         additional_dependencies: [types-PyYAML]
         args: ['--config-file=pyproject.toml']
         exclude: '^tests/'
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -m "not slow and not integration"
+        language: system
+        pass_filenames: false
