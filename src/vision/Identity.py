@@ -3,6 +3,7 @@ from typing import Any, cast
 import torch
 
 from vision import VisionModel
+from utils.tags import VisionTag
 
 
 class Identity(VisionModel):
@@ -11,7 +12,7 @@ class Identity(VisionModel):
     It mimics the output of a real vision model to be compatible with the WorldModel class.
     """
 
-    tags = ["vector_based"]
+    tags = frozenset({VisionTag.VECTOR_BASED})
 
     def __init__(self, input_shape: tuple[int], **_kwargs: Any) -> None:
         super().__init__()

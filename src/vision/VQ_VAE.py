@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from vision import VisionModel
+from utils.tags import VisionTag
 
 
 class ResidualBlock(torch.nn.Module):
@@ -158,7 +159,7 @@ class VQ_VAE(VisionModel):
     Implementation of the VQ-VAE model (https://arxiv.org/pdf/1711.00937).
     """
 
-    tags = ["image_based"]
+    tags = frozenset({VisionTag.IMAGE_BASED})
 
     def __init__(
         self,

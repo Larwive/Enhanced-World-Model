@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 
 from controller import ControllerModel
+from utils.tags import ControllerTag
 
 
 def orthogonal_init(layer: nn.Module, gain: float = 1.0) -> None:
@@ -25,7 +26,7 @@ class DeepContinuousController(ControllerModel):
     - Gaussian policy for continuous actions
     """
 
-    tags = frozenset({"continuous"})
+    tags = frozenset({ControllerTag.CONTINUOUS})
 
     def __init__(
         self,

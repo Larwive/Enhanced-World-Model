@@ -3,10 +3,11 @@ import torch
 from torch.distributions import Normal
 
 from controller import ControllerModel
+from utils.tags import ControllerTag
 
 
 class ContinuousModelPredictiveController(ControllerModel):
-    tags = ["continuous", "stochastic"]
+    tags = frozenset([ControllerTag.CONTINUOUS, ControllerTag.STOCHASTIC])
 
     def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
         super().__init__()

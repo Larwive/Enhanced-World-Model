@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.distributions import Categorical
 
 from controller import ControllerModel
+from utils.tags import ControllerTag
 
 
 def orthogonal_init(layer: nn.Linear, gain: float = 1.0) -> None:
@@ -16,8 +17,6 @@ def orthogonal_init(layer: nn.Linear, gain: float = 1.0) -> None:
 
 
 class DeepDiscreteController(ControllerModel):
-    tags = ["discrete", "stochastic"]
-
     """
     A deeper discrete controller with:
     - Multi-layer feature extraction
@@ -25,6 +24,8 @@ class DeepDiscreteController(ControllerModel):
     - Separate actor/critic heads
     - Orthogonal initialization
     """
+
+    tags = frozenset({ControllerTag.DISCRETE, ControllerTag.STOCHASTIC})
 
     def __init__(
         self,

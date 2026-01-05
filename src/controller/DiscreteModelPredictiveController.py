@@ -3,10 +3,11 @@ import torch
 from torch.distributions import Categorical
 
 from controller import ControllerModel
+from utils.tags import ControllerTag
 
 
 class DiscreteModelPredictiveController(ControllerModel):
-    tags = ["discrete", "stochastic"]
+    tags = frozenset({ControllerTag.DISCRETE, ControllerTag.STOCHASTIC})
 
     def __init__(self, z_dim: int, h_dim: int, action_dim: int):
         super().__init__()
