@@ -174,8 +174,8 @@ def main() -> None:
             args.env, num_envs=env_batch_size, render_mode=real_render_mode
         )  # args.render_mode)
 
+        log_messages: dict[str, list[str]] = {"info": [], "warning": [], "error": []}
         try:
-            log_messages: dict[str, list[str]] = {"info": [], "warning": [], "error": []}
             world_model, obs_space, action_space, log_messages = create_world_model(
                 args, VISION_REGISTRY, MEMORY_REGISTRY, CONTROLLER_REGISTRY, device, log_messages
             )
@@ -281,6 +281,7 @@ def main() -> None:
         logger.info("Environment closed.")
     except Exception as e:
         logger.exception(f"Exception during training: {e}")
+        raise e
 
 
 if __name__ == "__main__":
