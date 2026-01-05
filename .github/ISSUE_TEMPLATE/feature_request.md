@@ -26,9 +26,7 @@ How would you implement this feature? Include:
 ## Implementation Plan
 <!-- If this is a large feature, how should it be broken down into smaller PRs? -->
 
-- Step 1:
-- Step 2:
-- Step 3:
+1.
 
 ## Additional Context
 <!-- Any other information, examples, or references. -->
