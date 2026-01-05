@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from vision import VisionModel
+from utils.tags import VisionTag
 
 
 class ResidualBlock(nn.Module):
@@ -110,7 +111,7 @@ class JEPA(VisionModel):
         - More sample efficient
     """
 
-    tags = ["image_based", "no_reconstruction"]
+    tags = frozenset({VisionTag.IMAGE_BASED, VisionTag.NO_RECONSTRUCTION})
     # JEPA does NOT reconstruct pixels - it predicts in latent space
 
     def __init__(

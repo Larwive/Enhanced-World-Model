@@ -4,10 +4,11 @@ from torch.distributions import Normal, TransformedDistribution
 from torch.distributions.transforms import TanhTransform
 
 from controller import ControllerModel
+from utils.tags import ControllerTag
 
 
 class StochasticController(ControllerModel):
-    tags = ["continuous", "stochastic"]
+    tags = frozenset({ControllerTag.CONTINUOUS, ControllerTag.STOCHASTIC})
 
     def __init__(self, z_dim: int, h_dim: int, action_dim: int) -> None:
         super().__init__()
