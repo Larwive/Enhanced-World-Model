@@ -22,10 +22,19 @@ def create_model_from_args(
     model, obs_space, action_space, _ = create_world_model(
         args, vision_registry, memory_registry, controller_registry, torch.device("cpu")
     )
-    cli_printer.log(f"Loading model from {args.load_path}")
-    model.load(
-        args.load_path, obs_space=obs_space, action_space=action_space, device=torch.device("cpu")
-    )
+    if args.load_path:
+        cli_printer.log(f"Loading model from {args.load_path}")
+        model.load(
+            args.load_path,
+            obs_space=obs_space,
+            action_space=action_space,
+            device=torch.device("cpu"),
+        )
+    if args.patch_load_path:
+        cli_printer.log(f"Patching model with {args.patch_load_path}")
+        model.patch_load(
+            args.patch_load_path, args.patch, obs_space, action_space, torch.device("cpu")
+        )
     assert isinstance(model, WorldModel)
     return model
 
@@ -267,10 +276,23 @@ def edit_main_args(
 def print_advanced_args(args: Namespace) -> None:
     cli_printer.log("\nAdvanced arguments:", style=Style.CYAN + Style.UNDERLINE)
 
+    if not args.patch_load_path:
+        patches = ["None."]
+    else:
+        patches = []
+        if "v" in args.patch:
+            patches.append("vision")
+        if "m" in args.patch:
+            patches.append("memory")
+        if "c" in args.patch:
+            patches.append("controller")
+
     advanced_dict = {
         "  - Random seed": str(args.seed),
         "  - Save path": str(args.save_path),
         "  - Load path": str(args.load_path),
+        "  - Patch path": str(args.patch_load_path),
+        "  - Patching": ", ".join(patches),
         "  - Save frequency": str(args.save_freq),
         "  - Log frequency": str(args.log_freq),
         "  - Tensorboard": bool_state[args.tensorboard],
@@ -299,16 +321,30 @@ def edit_advanced_args(
 
     while True:
         cli_printer.log("\nEditing advanced arguments:", style=Style.CYAN + Style.INVERT)
+
+        if not args.patch_load_path:
+            patches = ["None"]
+        else:
+            patches = []
+            if "v" in args.patch:
+                patches.append("vision")
+            if "m" in args.patch:
+                patches.append("memory")
+            if "c" in args.patch:
+                patches.append("controller")
+
         advanced_edit_dict = {
             "  - 0: Seed": str(args.seed),
             "  - 1: Save path": str(args.save_path),
             "  - 2: Load path": str(args.load_path),
-            "  - 3: Save frequency": str(args.save_freq),
-            "  - 4: Log frequency": str(args.log_freq),
-            "  - 5: Tensorboard": bool_state[args.tensorboard],
-            "  - 6: Pretrain vision": bool_state[args.pretrain_vision],
-            "  - 7: Pretrain memory": bool_state[args.pretrain_memory],
-            "  - 8: Pretraining mode": str(args.pretrain_mode),
+            "  - 3: Patch path": str(args.patch_load_path),
+            "  - 4: Patching": ", ".join(patches),
+            "  - 5: Save frequency": str(args.save_freq),
+            "  - 6: Log frequency": str(args.log_freq),
+            "  - 7: Tensorboard": bool_state[args.tensorboard],
+            "  - 8: Pretrain vision": bool_state[args.pretrain_vision],
+            "  - 9: Pretrain memory": bool_state[args.pretrain_memory],
+            "  - 10: Pretraining mode": str(args.pretrain_mode),
             "  - x: : Back ": "",
         }
         cli_printer.dict_log(advanced_edit_dict)
@@ -341,18 +377,41 @@ def edit_advanced_args(
                 else:
                     cli_printer.error("Invalid path.")
             case "3":
+                patch_load_path = cli_printer.input("Enter path to patch model: ")
+                if patch_load_path and os.path.exists(patch_load_path):
+                    args.patch_load_path = patch_load_path
+                    model = create_model_from_args(
+                        args, vision_registry, memory_registry, controller_registry
+                    )
+
+                else:
+                    cli_printer.error("Invalid path.")
+            case "4":
+                cli_printer.log(
+                    "Enter models to patch:\n - `v` for vision\n - `m` for memory\n - `c` for controller\n Example: `vm` for vision and memory.",
+                    style=Style.YELLOW + Style.BOLD,
+                )
+                patch_choice = cli_printer.input("Choice: ")
+                if patch_choice in ["v", "m", "c", "vm", "vc", "mc", "vmc"]:
+                    args.patch = patch_choice
+                    model = create_model_from_args(
+                        args, vision_registry, memory_registry, controller_registry
+                    )
+                else:
+                    cli_printer.error("Invalid patch choice.")
+            case "5":
                 save_freq = cli_printer.input("Enter save frequency: ")
                 if save_freq.isdigit() and int(save_freq) >= 0:
                     args.save_freq = int(save_freq)
                 else:
                     cli_printer.error("Invalid value.")
-            case "4":
+            case "6":
                 log_freq = cli_printer.input("Enter log frequency: ")
                 if log_freq.isdigit() and int(log_freq) >= 0:
                     args.log_freq = int(log_freq)
                 else:
                     cli_printer.error("Invalid value.")
-            case "5":
+            case "7":
                 use_tensorboard = cli_printer.input("Use tensorboard? (y/n): ")
                 if use_tensorboard.lower() == "y":
                     args.tensorboard = True
@@ -360,7 +419,7 @@ def edit_advanced_args(
                     args.tensorboard = False
                 else:
                     cli_printer.error("Invalid input.")
-            case "6":
+            case "8":
                 pretrain_vision = cli_printer.input("Pretrain vision model? (y/n): ")
                 if pretrain_vision.lower() == "y":
                     args.pretrain_vision = True
@@ -368,7 +427,7 @@ def edit_advanced_args(
                     args.pretrain_vision = False
                 else:
                     cli_printer.error("Invalid input.")
-            case "7":
+            case "9":
                 pretrain_memory = cli_printer.input("Pretrain memory model? (y/n): ")
                 if pretrain_memory.lower() == "y":
                     args.pretrain_memory = True
@@ -376,7 +435,7 @@ def edit_advanced_args(
                     args.pretrain_memory = False
                 else:
                     cli_printer.error("Invalid input.")
-            case "8":
+            case "10":
                 pretrain_dict = {"  - 0: ": "Random", "  - 1: ": "Manual"}
                 cli_printer.dict_log(pretrain_dict)
                 value = cli_printer.input("Choose new pretraining mode: ")
@@ -487,7 +546,7 @@ def print_inference_args(
     print_separator()
     cli_printer.log("Inference mode arguments:", style=Style.CYAN + Style.UNDERLINE)
     cli_printer.log(f"Loaded model: {args.load_path}")
-    if not args.load_path:
+    if not args.load_path or not args.patch_load_path:
         cli_printer.error("No model loaded. Please set a model to load.")
     if model:
         vision_warning, controller_warning = get_model_warnings(
@@ -501,12 +560,26 @@ def print_inference_args(
         )
     else:
         vision_warning, controller_warning = "", ""
+
+    if not args.patch_load_path:
+        patches = ["None."]
+    else:
+        patches = []
+        if "v" in args.patch:
+            patches.append("vision")
+        if "m" in args.patch:
+            patches.append("memory")
+        if "c" in args.patch:
+            patches.append("controller")
+
     infer_dict = {
         "  Env": str(args.env),
         "  - Vision    ": "Empty",
         "  - Memory    ": "Empty",
         "  - Controller": "Empty",
         "  - Model path": str(args.load_path),
+        "  - Patch path": str(args.patch_load_path),
+        "  - Patching": ", ".join(patches),
         "  - Episodes": str(args.episodes),
         "  - Render mode": str(args.render_mode),
     }
@@ -537,14 +610,28 @@ def edit_inference_args(
     while True:
         print_separator()
         cli_printer.log("\nEditing main configuration:", style=Style.CYAN + Style.INVERT)
+
+        if not args.patch_load_path:
+            patches = ["None"]
+        else:
+            patches = []
+            if "v" in args.patch:
+                patches.append("vision")
+            if "m" in args.patch:
+                patches.append("memory")
+            if "c" in args.patch:
+                patches.append("controller")
+
         infer_dict = {
             "  Vision": "Empty",
             "  Memory": "Empty",
             "  Controller": "Empty",
             "  - 0: Environment": str(args.env),
             "  - 1: Loaded model": str(args.load_path),
-            "  - 2: Episodes": str(args.episodes),
-            "  - 3: Render mode": str(args.render_mode),
+            "  - 2: Patch path": str(args.patch_load_path),
+            "  - 3: Patching": ", ".join(patches),
+            "  - 4: Episodes": str(args.episodes),
+            "  - 5: Render mode": str(args.render_mode),
             "  - x: : Back ": "",
         }
 
@@ -572,13 +659,36 @@ def edit_inference_args(
                 else:
                     cli_printer.error("Invalid path.")
             case "2":
+                patch_load_path = cli_printer.input("Enter path to patch model: ")
+                if patch_load_path and os.path.exists(patch_load_path):
+                    args.patch_load_path = patch_load_path
+                    model = create_model_from_args(
+                        args, vision_registry, memory_registry, controller_registry
+                    )
+
+                else:
+                    cli_printer.error("Invalid path.")
+            case "3":
+                cli_printer.log(
+                    "Enter models to patch:\n - `v` for vision\n - `m` for memory\n - `c` for controller\n Example: `vm` for vision and memory.",
+                    style=Style.YELLOW + Style.BOLD,
+                )
+                patch_choice = cli_printer.input("Choice: ")
+                if patch_choice in ["v", "m", "c", "vm", "vc", "mc", "vmc"]:
+                    args.patch = patch_choice
+                    model = create_model_from_args(
+                        args, vision_registry, memory_registry, controller_registry
+                    )
+                else:
+                    cli_printer.error("Invalid patch choice.")
+            case "4":
                 value = cli_printer.input("Enter new value for number of episodes: ")
 
                 if value.isdigit():
                     args.episodes = int(value)
                 else:
                     cli_printer.error("Invalid value.")
-            case "3":
+            case "5":
                 render_modes = {
                     "0": ("rgb_array", "RGB array (no render)"),
                     "1": ("human", "Human"),
