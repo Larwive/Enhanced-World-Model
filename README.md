@@ -76,6 +76,8 @@ The accepted arguments are:
 - `--seed` to set the seed.
 - `--save-path` for the path to save the model.
 - `--load-path` to load an existing model.
+- `--patch-load-path` to modularly load a model on top of the existing model.
+- `--patch` to specify which parts (vision, memory, controller) to load with `--patch-load-path`.
 - `--save-freq` the number of epochs between each save.
 - `--log-freq` the number of epochs between each log.
 - `--tensorboard` whether to log gradients and losses into TensorBoard.
