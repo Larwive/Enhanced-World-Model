@@ -73,8 +73,18 @@ def main() -> None:
     parser.add_argument("--render-mode", type=str, default="rgb_array")
 
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--save-path", default="./saved_models/")
-    parser.add_argument("--load-path", default="")
+    parser.add_argument("--save-path", type=str, default="./saved_models/")
+    parser.add_argument("--load-path", type=str, default="")
+    parser.add_argument(
+        "--patch-load-path", type=str, default="", help="Path to model to load on top."
+    )
+    parser.add_argument(
+        "--patch",
+        type=str,
+        default="vmc",
+        choices=["v", "m", "c", "vm", "vc", "mc", "vmc"],
+        help="The sub models to patch.",
+    )
     parser.add_argument(
         "--save-freq", type=int, default=10, help="Frequency of saving model checkpoints."
     )
@@ -201,7 +211,27 @@ def main() -> None:
                 args.load_path, obs_space=obs_space, action_space=action_space, device=device
             )
 
+        if args.patch_load_path:
+            patches = []
+            if "v" in args.patch:
+                patches.append("vision")
+            if "m" in args.patch:
+                patches.append("memory")
+            if "c" in args.patch:
+                patches.append("controller")
+
+            logger.info(f"Patching {', '.join(patches)} of model with {args.patch_load_path}")
+            world_model.patch_load(
+                args.patch_load_path,
+                args.patch,
+                obs_space=obs_space,
+                action_space=action_space,
+                device=device,
+            )
+
         if args.infer:
+            if not args.load_path or args.patch_load_path:
+                logger.warning("World model is not initialized. Infering with random weights.")
             world_model.eval()
             evaluate(
                 world_model, args.env, num_episodes=args.episodes, render_mode=args.render_mode

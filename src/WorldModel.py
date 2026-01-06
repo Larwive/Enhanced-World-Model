@@ -225,27 +225,43 @@ class WorldModel(Model):
         torch.save(saving_dict, path)
 
     def load(self, path: Path, obs_space: Any, action_space: Any, device: torch.device) -> None:
-        # TODO: Check input/output shape consistencies between components before loading the weights ?
-        saved_dict = torch.load(path, weights_only=False, map_location=device)
+        self.patch_load(path, "vmc", obs_space, action_space, device)
 
-        if saved_dict["obs_space"] != obs_space or saved_dict["action_space"] != action_space:
-            print(
-                "Observation space and/or action space of the saved model do not match those of the current environment."
-            )
+    def patch_load(
+        self,
+        patch_path: Path,
+        patches: str,
+        obs_space: Any,
+        action_space: Any,
+        device: torch.device,
+    ) -> None:
+        # TODO: Check input/output shape consistencies between components before loading the weights ?
+        saved_dict = torch.load(patch_path, weights_only=False, map_location=device)
 
         self.iter_num = saved_dict["iter_num"]
         self.nb_experiments = saved_dict["nb_experiments"]
 
-        self.vision = VISION_REGISTRY[saved_dict["vision_model"]](**saved_dict["vision_args"])
-        self.vision.load(saved_dict["vision_dict"])
+        if "v" in patches:
+            if saved_dict["obs_space"] != obs_space:
+                print(
+                    "\nObservation space of the vision to load does not match those of the current environment.\n"
+                )
+            self.vision = VISION_REGISTRY[saved_dict["vision_model"]](**saved_dict["vision_args"])
+            self.vision.load(saved_dict["vision_dict"])
 
-        self.memory = MEMORY_REGISTRY[saved_dict["memory_model"]](**saved_dict["memory_args"])
-        self.memory.load(saved_dict["memory_dict"])
+        if "m" in patches:
+            self.memory = MEMORY_REGISTRY[saved_dict["memory_model"]](**saved_dict["memory_args"])
+            self.memory.load(saved_dict["memory_dict"])
 
-        self.controller = CONTROLLER_REGISTRY[saved_dict["controller_model"]](
-            **saved_dict["controller_args"]
-        )
-        self.controller.load(saved_dict["controller_dict"])
+        if "c" in patches:
+            if saved_dict["action_space"] != action_space:
+                print(
+                    "\nAction space of the controller to load does not match those of the current environment.\n"
+                )
+            self.controller = CONTROLLER_REGISTRY[saved_dict["controller_model"]](
+                **saved_dict["controller_args"]
+            )
+            self.controller.load(saved_dict["controller_dict"])
 
 
 def render_first_env(envs: Any, title: str = "") -> None:
