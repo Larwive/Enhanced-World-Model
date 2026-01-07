@@ -13,8 +13,8 @@ from inference import evaluate
 from pretrain import pretrain
 from train import train
 from utils.cli import CLI
-from utils.registry import discover_modules
 from utils.model import create_world_model
+from utils.registry import discover_modules
 
 VISION_REGISTRY: dict = discover_modules(vision)
 MEMORY_REGISTRY: dict = discover_modules(memory)
@@ -256,7 +256,7 @@ def main() -> None:
                 envs,
                 max_iter=args.epochs,
                 device=device,
-                learning_rate=args.learning_rate,
+                learning_rate=args.lr,
                 mode=args.pretrain_mode,
                 delay=args.manual_mode_delay,
                 save_path=args.save_path,
